@@ -41,7 +41,7 @@ from jobbot.ats.detect import ATS, REQUIRES_ACCOUNT, detect
 from jobbot.browser import capture as cap
 from jobbot.browser.session import BrowserSession
 from jobbot.discovery.sources import JobPost, ghost_score
-from jobbot.forms.fill import apply_answer
+from jobbot.forms.fill import apply_answer, q
 from jobbot.forms.model import AnswerSource, FieldKind, ParsedForm, ProposedAnswer
 from jobbot.healer import checkpoints as ck
 from jobbot.healer.answer import deterministic_answers, model_answers
@@ -128,16 +128,23 @@ def fit_score(profile: Profile, post: JobPost) -> float:
     if not text.strip():
         return 0.5
 
-    skills = [s.lower() for items in profile.skills.values() for s in items]
-    hits = sum(1 for s in skills if s and s in text)
-    skill_score = min(1.0, hits / max(6, len(skills) * 0.35)) if skills else 0.5
-
     titles = [t.lower() for t in profile.target_titles]
     title_score = 1.0 if any(t in post.title.lower() for t in titles) else 0.45
     if not titles:
         title_score = 0.6
 
-    score = 0.6 * skill_score + 0.4 * title_score
+    if post.description.strip():
+        skills = [s.lower() for items in profile.skills.values() for s in items]
+        hits = sum(1 for s in skills if s and s in text)
+        skill_score = min(1.0, hits / max(6, len(skills) * 0.35)) if skills else 0.5
+        score = 0.6 * skill_score + 0.4 * title_score
+    else:
+        # Workday's search API returns postings with no description body. Scoring
+        # skills against a bare title always yields zero, which put every Workday
+        # posting under the default 0.5 threshold -- silently filtering out the
+        # ATS that accounts for most of the real apply volume. Score on the title
+        # alone instead of penalising the posting for data the source never sent.
+        score = title_score
 
     # Seniority sanity. Applying to Staff and Principal roles with under two
     # years of experience is the undirected-volume case the evidence says has
@@ -406,31 +413,36 @@ class Orchestrator:
                 filled += 1
         log.info("apply.filled", job_id=jid, filled=filled, total=len(form.fields))
 
-        (audit / "answers.json").write_text(json.dumps([
-            {
-                "field_id": a.field_id,
-                "label": (by_id[a.field_id].label if a.field_id in by_id else ""),
-                "kind": (by_id[a.field_id].kind.value if a.field_id in by_id else ""),
-                "required": (by_id[a.field_id].required if a.field_id in by_id else False),
-                "value": a.value if not isinstance(a.value, Path) else str(a.value),
-                "source": a.source.value,
-                "confidence": a.confidence,
-                "rationale": a.rationale,
-                "needs_human": a.needs_human,
-                "blocked_reason": a.blocked_reason,
-            }
-            for a in answers
-        ], indent=2, default=str))
+        def dump_answers() -> None:
+            (audit / "answers.json").write_text(json.dumps([
+                {
+                    "field_id": a.field_id,
+                    "label": (by_id[a.field_id].label if a.field_id in by_id else ""),
+                    "kind": (by_id[a.field_id].kind.value if a.field_id in by_id else ""),
+                    "required": (by_id[a.field_id].required if a.field_id in by_id else False),
+                    "value": a.value if not isinstance(a.value, Path) else str(a.value),
+                    "source": a.source.value,
+                    "confidence": a.confidence,
+                    "rationale": a.rationale,
+                    "needs_human": a.needs_human,
+                    "blocked_reason": a.blocked_reason,
+                }
+                for a in answers
+            ], indent=2, default=str))
+            self.answer_log.record(
+                job_id=jid, company=post.company, title=post.title,
+                ats=post.ats.value, job_url=post.url,
+                answers=json.loads((audit / "answers.json").read_text()))
 
-        self.answer_log.record(
-            job_id=jid, company=post.company, title=post.title,
-            ats=post.ats.value, job_url=post.url,
-            answers=json.loads((audit / "answers.json").read_text()))
+        dump_answers()
 
         # --- checkpoint 2 + healing ---------------------------------------
         verification, rounds = await ck.heal(
             page, self.llm, self.profile, form, answers, shots,
             max_rounds=self.cfg.max_heal_rounds, resume_path=resume_pdf)
+        # The healer rewrites answers in place, so re-record. Written once before
+        # the loop as well, so a crash mid-heal still leaves a ledger behind.
+        dump_answers()
         (audit / "verification.json").write_text(json.dumps({
             "ready": verification.ready_to_submit,
             "summary": verification.summary,
@@ -462,7 +474,7 @@ class Orchestrator:
 
         # --- submit --------------------------------------------------------
         submitted_click = False
-        for sel in (f"button:has-text('{form.submit_label}')",
+        for sel in (f"button:has-text({q(form.submit_label)})",
                     "[data-automation-id='bottom-navigation-submit-button']",
                     "button[type=submit]", "input[type=submit]"):
             try:
@@ -555,6 +567,17 @@ class Orchestrator:
             log.warning("project.smoke_failed", output=smoke["output"][-200:])
             return None, ""
 
+        if self.cfg.dry_run:
+            # Creating a repository is public and not retractable, so it does not
+            # belong in a run the user asked to stop before submitting. The plan
+            # is still built and smoke-tested locally; only the push is withheld.
+            # No URL is returned, so the resume never prints a link to a repo
+            # that does not exist.
+            log.info("project.dry_run_not_published", repo=plan["repo_name"],
+                     local=str(local))
+            return ({"name": plan["repo_name"],
+                     "bullets": plan.get("resume_bullets", [])}, "")
+
         import shutil
         shutil.rmtree(local, ignore_errors=True)
         pub = publish(ident, plan, private=self.cfg.publish_project_private,
@@ -625,7 +648,18 @@ class Orchestrator:
         results: list[ApplicationResult] = []
         import random
         for i, (_, post) in enumerate(queue[:limit]):
-            results.append(await self.apply_to(post))
+            # Count against the cap as we go, not only against history. The
+            # pre-queue check reads a snapshot taken before the run, so without
+            # this a single run could send every posting at one company.
+            key = post.company.strip().lower()
+            if key and applied_companies.get(key, 0) >= self.cfg.per_company_cap:
+                log.info("run.company_cap_reached", company=post.company,
+                         cap=self.cfg.per_company_cap)
+                continue
+            r = await self.apply_to(post)
+            results.append(r)
+            if r.status in (Status.SUBMITTED.value, Status.CONFIRMED.value) and key:
+                applied_companies[key] = applied_companies.get(key, 0) + 1
             if i < min(limit, len(queue)) - 1:
                 await asyncio.sleep(random.uniform(*self.cfg.pace_seconds))
         return results
