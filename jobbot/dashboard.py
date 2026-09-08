@@ -1,0 +1,642 @@
+"""Read-only local dashboard over everything a run leaves on disk.
+
+The run already records what it did -- `applications.csv`, `answers.csv`, and a
+per-application audit directory with the screenshots each checkpoint took. What
+was missing was a way to look at it without opening six files in a spreadsheet.
+
+Read-only on purpose. This shows what happened; it never edits a profile, never
+retries an application, never touches the browser. Nothing here can change what
+was said in the user's name, which is the one property worth keeping.
+
+stdlib only (`http.server`), bound to loopback. The data includes a full name,
+address, phone number and every answer given to an employer, so it does not go
+on a network interface.
+"""
+
+from __future__ import annotations
+
+import csv
+import html
+import json
+import socket
+import threading
+import webbrowser
+from datetime import datetime, timezone
+from functools import partial
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qs, quote, unquote, urlparse
+
+CSS = """
+:root{--bg:#0c0d10;--panel:#14161b;--line:#22252c;--fg:#d7dae0;--dim:#7c828e;
+--ok:#5ec27a;--warn:#e0b341;--bad:#e0605e;--acc:#6aa9f0}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.5 ui-monospace,
+SFMono-Regular,Menlo,monospace}
+a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
+header{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);
+padding:10px 16px;display:flex;gap:18px;align-items:baseline;z-index:5}
+header b{font-size:15px;letter-spacing:.5px}
+nav a{margin-right:14px;color:var(--dim)}nav a.on{color:var(--fg)}
+main{padding:16px;max-width:1500px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--dim);
+margin:26px 0 8px;font-weight:400}
+h2:first-child{margin-top:0}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+.tile .n{font-size:22px;line-height:1.15;overflow-wrap:anywhere}
+.tile .n.txt{font-size:15px;padding:3px 0 4px}
+.nw{white-space:nowrap}
+.tile .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+table{width:100%;border-collapse:collapse;background:var(--panel);
+border:1px solid var(--line);border-radius:6px;overflow:hidden}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);
+vertical-align:top;max-width:520px;overflow-wrap:break-word}
+th{color:var(--dim);font-weight:400;font-size:11px;text-transform:uppercase;
+letter-spacing:.6px;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#181b21}
+.pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;
+border:1px solid var(--line)}
+.s-confirmed{color:var(--ok);border-color:#2c4a35}
+.s-submitted{color:var(--warn);border-color:#4a4029}
+.s-needs_human,.s-knockout_fail{color:var(--warn);border-color:#4a4029}
+.s-failed,.s-unreachable{color:var(--bad);border-color:#4a2b2b}
+.s-prepared,.s-filling{color:var(--acc);border-color:#26405e}
+.s-filtered_out,.s-ghost_suspected,.s-discovered{color:var(--dim)}
+.dim{color:var(--dim)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+pre{background:var(--panel);border:1px solid var(--line);border-radius:6px;
+padding:10px;overflow:auto;max-height:420px;margin:0;white-space:pre-wrap}
+.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px}
+.shots figure{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:6px;
+overflow:hidden}
+.shots img{width:100%;display:block;border-bottom:1px solid var(--line)}
+.shots figcaption{padding:5px 8px;color:var(--dim);font-size:11px}
+.bar{display:inline-block;vertical-align:middle;width:52px;height:6px;
+background:var(--line);border-radius:3px;overflow:hidden;margin-right:6px}
+.bar i{display:block;height:100%;background:var(--acc)}
+.empty{color:var(--dim);padding:14px;border:1px dashed var(--line);border-radius:6px}
+.banner{background:#1a2230;border:1px solid #26405e;border-radius:6px;padding:9px 12px;
+margin-bottom:14px;color:var(--acc)}
+"""
+
+NAV = [("/", "overview"), ("/answers", "answers"), ("/profile", "profile"),
+       ("/lessons", "lessons"), ("/log", "notifications")]
+
+TERMINAL = {"confirmed", "submitted"}
+LIVE = {"filling", "prepared"}
+
+
+# -- reading -------------------------------------------------------------
+
+
+def read_csv(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    with open(path, newline="", encoding="utf-8") as fh:
+        return [dict(r) for r in csv.DictReader(fh)]
+
+
+def read_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def read_jsonl(path: Path, limit: int = 400) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text().splitlines()[-limit:]:
+        try:
+            out.append(json.loads(line))
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def audit_dirname(job_id: str) -> str:
+    """Match the orchestrator's own sanitising, so links resolve."""
+    return job_id.replace(":", "_").replace("/", "_")
+
+
+# -- rendering -----------------------------------------------------------
+
+
+def e(s: Any) -> str:
+    return html.escape("" if s is None else str(s))
+
+
+def page(title: str, active: str, body: str, *, refresh: int = 0) -> bytes:
+    nav = "".join(
+        f'<a href="{p}" class="{"on" if p == active else ""}">{n}</a>'
+        for p, n in NAV
+    )
+    meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ""
+    return (
+        f"<!doctype html><html><head><meta charset=utf-8>{meta}"
+        f'<link rel="icon" href="data:,">'
+        f"<title>jobbot — {e(title)}</title><style>{CSS}</style></head><body>"
+        f"<header><b>jobbot</b><nav>{nav}</nav>"
+        f'<span class=dim style="margin-left:auto">'
+        f'{datetime.now().strftime("%H:%M:%S")}</span></header>'
+        f"<main>{body}</main></body></html>"
+    ).encode()
+
+
+def pill(status: str) -> str:
+    return f'<span class="pill s-{e(status)}">{e(status or "?")}</span>'
+
+
+def tiles(pairs: list[tuple[str, Any]]) -> str:
+    def cell(k: str, v: Any) -> str:
+        # A count fits at 22px; a company name or a status word does not, and
+        # clipping the tenant name is exactly the thing you opened this to read.
+        cls = "n txt" if len(str(v)) > 7 else "n"
+        return (f'<div class=tile><div class="{cls}">{e(v)}</div>'
+                f'<div class=k>{e(k)}</div></div>')
+    return f'<div class=tiles>{"".join(cell(k, v) for k, v in pairs)}</div>'
+
+
+def bar(frac: float) -> str:
+    pct = max(0, min(100, round(frac * 100)))
+    return f'<span class=bar><i style="width:{pct}%"></i></span>'
+
+
+def table(headers: list[str], rows: list[list[str]], empty: str = "nothing yet") -> str:
+    if not rows:
+        return f'<div class=empty>{e(empty)}</div>'
+    head = "".join(f"<th>{e(h)}</th>" for h in headers)
+    body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>" for r in rows)
+    return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+
+
+def _outcome(a: dict[str, str]) -> str:
+    """Confirmation if we have one, else why not. Full text on hover."""
+    if a.get("confirmation_text"):
+        cls, txt = "ok", a["confirmation_text"]
+    else:
+        cls, txt = "dim", (a.get("error") or a.get("notes") or "")
+    if not txt:
+        return ""
+    short = txt[:58] + ("\u2026" if len(txt) > 58 else "")
+    return f'<span class={cls} title="{e(txt)}">{e(short)}</span>'
+
+
+def num(s: Any, default: float = 0.0) -> float:
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return default
+
+
+# -- views ---------------------------------------------------------------
+
+
+class Dash:
+    def __init__(self, data_dir: Path, profile_path: Path) -> None:
+        self.data = data_dir
+        self.profile_path = profile_path
+
+    # sources
+    def apps(self) -> list[dict[str, str]]:
+        return read_csv(self.data / "applications.csv")
+
+    def answers(self) -> list[dict[str, str]]:
+        return read_csv(self.data / "answers.csv")
+
+    def overview(self) -> bytes:
+        apps = self.apps()
+        ans = self.answers()
+        counts: dict[str, int] = {}
+        for a in apps:
+            counts[a.get("status", "?")] = counts.get(a.get("status", "?"), 0) + 1
+
+        live = [a for a in apps if a.get("status") in LIVE]
+        banner = ""
+        if live:
+            cur = live[-1]
+            banner = (f'<div class=banner>in flight: '
+                      f'<b>{e(cur.get("title"))}</b> @ {e(cur.get("company"))} '
+                      f'— {e(cur.get("status"))}</div>')
+
+        submitted = [a for a in apps if a.get("status") in TERMINAL]
+        blanks = sum(1 for r in ans if r.get("left_blank") == "True")
+        scored = [num(a.get("match_score")) for a in apps if a.get("match_score")]
+        head = tiles([
+            ("postings", len(apps)),
+            ("submitted", len(submitted)),
+            ("confirmed", counts.get("confirmed", 0)),
+            ("needs you", counts.get("needs_human", 0)),
+            ("knockout", counts.get("knockout_fail", 0)),
+            ("unreachable", counts.get("unreachable", 0)),
+            ("answers logged", len(ans)),
+            ("left blank", blanks),
+            ("avg fit", f"{sum(scored)/len(scored):.2f}" if scored else "-"),
+        ])
+
+        order = ["confirmed", "submitted", "filling", "prepared", "needs_human",
+                 "knockout_fail", "unreachable", "failed", "ghost_suspected",
+                 "filtered_out", "discovered"]
+        rank = {s: i for i, s in enumerate(order)}
+        rows = []
+        for a in sorted(apps, key=lambda r: (rank.get(r.get("status", ""), 99),
+                                             -num(r.get("match_score")))):
+            d = audit_dirname(a.get("job_id", ""))
+            has_audit = (self.data / "applications" / d).is_dir()
+            title = e(a.get("title", ""))[:70]
+            link = (f'<a href="/app/{quote(d)}">{title}</a>' if has_audit else title)
+            flagged = a.get("questions_flagged") or ""
+            rows.append([
+                pill(a.get("status", "")),
+                link,
+                e(a.get("company", "")),
+                e(a.get("ats", "")),
+                f'<span class=nw>{bar(num(a.get("match_score")))}'
+                f'{e(a.get("match_score", "")[:4])}</span>',
+                (f'{e(a.get("questions_answered"))}/{e(a.get("questions_total"))}'
+                 if a.get("questions_total") else '<span class=dim>&mdash;</span>'),
+                (f'<span class=warn>{e(flagged)}</span>' if flagged not in ("", "0")
+                 else '<span class=dim>0</span>'),
+                e(a.get("heal_rounds", "")) or '<span class=dim>&mdash;</span>',
+                _outcome(a),
+                f'<span class=nw>'
+                f'{e((a.get("applied_at") or a.get("discovered_at") or "")[:16].replace("T", " "))}'
+                f'</span>',
+            ])
+
+        return page("overview", "/", banner + "<h2>run</h2>" + head
+                    + "<h2>postings</h2>"
+                    + table(["status", "role", "company", "ats", "fit", "fields",
+                             "blank", "heals", "outcome", "when"], rows,
+                            "no applications.csv yet — run `jobbot discover` or `jobbot run`"),
+                    refresh=10)
+
+    def app_detail(self, dirname: str) -> bytes:
+        d = self.data / "applications" / dirname
+        if not d.is_dir():
+            return page("not found", "/", '<div class=empty>no such audit dir</div>')
+
+        row = next((a for a in self.apps()
+                    if audit_dirname(a.get("job_id", "")) == dirname), {})
+        parts: list[str] = [
+            f'<h2>{e(row.get("title") or dirname)}</h2>',
+            tiles([
+                ("status", row.get("status", "?")),
+                ("company", row.get("company", "-")),
+                ("ats", row.get("ats", "-")),
+                ("fit", row.get("match_score", "-")),
+                ("ghost", row.get("ghost_score", "-") or "-"),
+                ("heals", row.get("heal_rounds", "-") or "-"),
+            ]),
+        ]
+        if row.get("job_url"):
+            parts.append(f'<p><a href="{e(row["job_url"])}" target=_blank>'
+                         f'{e(row["job_url"])[:110]}</a></p>')
+
+        for label, key in (("error", "error"), ("notes", "notes"),
+                           ("knockout", "knockout_reason"),
+                           ("confirmation", "confirmation_text")):
+            if row.get(key):
+                cls = "ok" if key == "confirmation_text" else "warn"
+                parts.append(f'<h2>{label}</h2><pre class={cls}>{e(row[key])}</pre>')
+
+        # answers
+        answers = read_json(d / "answers.json") or []
+        rows = []
+        for a in answers:
+            blank = a.get("needs_human")
+            rows.append([
+                f'<span class="dim nw">{e(a.get("source", ""))}</span>',
+                e(a.get("label", ""))[:90] + (" *" if a.get("required") else ""),
+                (f'<span class=warn>— blank: {e(a.get("blocked_reason", ""))[:70]}</span>'
+                 if blank else e(a.get("value"))[:160]),
+                e(a.get("rationale", ""))[:90],
+                e(a.get("confidence", "")),
+            ])
+        parts.append("<h2>answers entered</h2>"
+                     + table(["source", "field", "value", "why", "conf"], rows,
+                             "no answers.json"))
+
+        # verification
+        v = read_json(d / "verification.json")
+        if v:
+            iss = [[pill(i.get("severity", "")), e(i.get("label", ""))[:70],
+                    e(i.get("problem", ""))[:140], e(i.get("suggested_value"))[:60]]
+                   for i in v.get("issues", [])]
+            ready = ('<span class=ok>ready</span>' if v.get("ready")
+                     else '<span class=bad>not ready</span>')
+            parts.append(f'<h2>checkpoint 2 — {ready}, {e(v.get("heal_rounds"))} heal round(s)</h2>')
+            if v.get("summary"):
+                parts.append(f'<pre>{e(v["summary"])}</pre>')
+            parts.append(table(["severity", "field", "problem", "suggested"], iss,
+                               "no issues raised"))
+            for k in ("unfilled_required", "validation_errors"):
+                if v.get(k):
+                    parts.append(f'<h2>{k.replace("_", " ")}</h2>'
+                                 f'<pre class=warn>{e(json.dumps(v[k], indent=1))}</pre>')
+
+        # resume
+        resume = d / "resume.pdf"
+        crit = read_json(d / "resume_critique.json") or []
+        final = next((h for h in reversed(crit) if "final_ats_score" in h), {})
+        if resume.exists() or crit:
+            bits = []
+            if final:
+                bits.append(tiles([("ats score", final.get("final_ats_score", "-")),
+                                   ("keywords", final.get("keyword_match", "-")),
+                                   ("skills", final.get("skills_coverage", "-")),
+                                   ("rounds", len(crit) - 1)]))
+            if resume.exists():
+                rel = quote(str(resume.relative_to(self.data)))
+                bits.append(f'<p><a href="/f/{rel}" target=_blank>open resume.pdf</a> '
+                            f'<span class=dim>({resume.stat().st_size // 1024} KB)</span></p>')
+            rounds = [[e(h.get("round")), e(h.get("verdict")), e(h.get("revisions")),
+                       e(h.get("applied")), e(h.get("ats_score")),
+                       e(h.get("strongest_signal", ""))[:80]]
+                      for h in crit if "round" in h]
+            bits.append(table(["round", "verdict", "revisions", "applied", "score",
+                               "strongest signal"], rounds, "no critique rounds"))
+            parts.append("<h2>resume</h2>" + "".join(bits))
+
+        for label, name in (("skills removed", "skills_removed.txt"),
+                            ("fabrication report", "fabrication_report.txt"),
+                            ("needs human", "needs_human.txt"),
+                            ("crash", "error.txt")):
+            f = d / name
+            if f.exists():
+                parts.append(f'<h2>{label}</h2><pre class=warn>{e(f.read_text()[:4000])}</pre>')
+
+        smoke = read_json(d / "project_smoke.json")
+        if smoke:
+            ok = ('<span class=ok>passed</span>' if smoke.get("passed")
+                  else '<span class=bad>failed</span>')
+            parts.append(f'<h2>generated project — {ok}</h2>'
+                         f'<pre>$ {e(smoke.get("command"))}\n'
+                         f'{e((smoke.get("output") or "")[-2000:])}</pre>')
+
+        shots = sorted((d / "screenshots").glob("*.png")) if (d / "screenshots").is_dir() else []
+        if shots:
+            figs = []
+            for s in shots:
+                rel = quote(str(s.relative_to(self.data)))
+                figs.append(f'<figure><a href="/f/{rel}" target=_blank>'
+                            f'<img loading=lazy src="/f/{rel}"></a>'
+                            f'<figcaption>{e(s.name)}</figcaption></figure>')
+            parts.append(f'<h2>screenshots ({len(shots)})</h2>'
+                         f'<div class=shots>{"".join(figs)}</div>')
+
+        return page(row.get("title") or dirname, "/", "".join(parts))
+
+    def answers_view(self, blanks_only: bool) -> bytes:
+        rows_in = self.answers()
+        if blanks_only:
+            rows_in = [r for r in rows_in if r.get("left_blank") == "True"]
+        rows = []
+        for r in reversed(rows_in[-800:]):
+            d = audit_dirname(r.get("job_id", ""))
+            rows.append([
+                f'<a href="/app/{quote(d)}">{e(r.get("company", ""))}</a>',
+                e(r.get("field_label", ""))[:80]
+                + (" <span class=dim>*</span>" if r.get("required") == "True" else ""),
+                (f'<span class=warn>blank — {e(r.get("blank_reason", ""))[:70]}</span>'
+                 if r.get("left_blank") == "True" else e(r.get("answer", ""))[:170]),
+                f'<span class="dim nw">{e(r.get("source", ""))}</span>',
+                e(r.get("rationale", ""))[:80],
+            ])
+        toggle = ('<a href="/answers">show all</a>' if blanks_only
+                  else '<a href="/answers?blank=1">only what was left blank</a>')
+        return page("answers", "/answers",
+                    f"<h2>every answer given in your name — {toggle}</h2>"
+                    + table(["company", "field", "answer", "source", "why"], rows,
+                            "no answers.csv yet"))
+
+    def profile_view(self) -> bytes:
+        try:
+            from jobbot.profile import CORE_SCREENING, LEGALLY_SIGNIFICANT, Profile
+            p = Profile.load(self.profile_path)
+        except Exception as exc:  # noqa: BLE001
+            return page("profile", "/profile",
+                        f'<div class=empty>cannot load {e(self.profile_path)}: '
+                        f'{e(str(exc)[:300])}</div>')
+
+        missing = p.missing_legally_significant()
+        parts = [
+            "<h2>identity</h2>",
+            tiles([("name", p.identity.full_name), ("roles", len(p.experience)),
+                   ("years", p.total_years_experience),
+                   ("skills", sum(len(v) for v in p.skills.values())),
+                   ("projects", len(p.projects)),
+                   ("awards", len(p.awards) + len(p.publications))]),
+        ]
+        if missing:
+            parts.append(f'<h2>blocking the run</h2><pre class=bad>'
+                         f'{e(chr(10).join("- " + m for m in missing))}\n\n'
+                         f'set these in {e(self.profile_path)} — never guessed, '
+                         f'never defaulted</pre>')
+        else:
+            parts.append('<h2>preflight</h2><pre class=ok>all core screening '
+                         'answers confirmed</pre>')
+
+        gaps = p.employment_gaps()
+        if gaps:
+            parts.append("<h2>employment gaps &gt;6mo</h2><pre class=warn>"
+                         + e("\n".join(f"{a} → {b}" for a, b in gaps)) + "</pre>")
+
+        parts.append("<h2>experience</h2>" + table(
+            ["role", "company", "dates", "bullets", "tech"],
+            [[e(x.title), e(x.company),
+              f'{x.start} → {x.end or "present"}', str(len(x.bullets)),
+              e(", ".join(x.tech))[:70]] for x in p.experience]))
+
+        parts.append("<h2>projects</h2>" + table(
+            ["name", "what", "link"],
+            [[e(x.name), e(x.description)[:90],
+              (f'<a href="{e(x.url)}" target=_blank>{e(x.url)[:60]}</a>' if x.url else
+               '<span class=dim>—</span>')] for x in p.projects],
+            "no projects in the profile"))
+
+        parts.append("<h2>awards &amp; publications</h2>" + table(
+            ["entry"], [[e(x)] for x in p.publications + p.awards],
+            "none — these are the hardest signals to fake, worth filling in"))
+
+        parts.append("<h2>screening answers</h2>" + table(
+            ["question", "answer", "provenance"],
+            [[e(k) + (" <span class=dim>(legal)</span>"
+                      if k in LEGALLY_SIGNIFICANT else ""),
+              e(v.value), f'<span class=dim>{e(v.provenance.value)}</span>']
+             for k, v in sorted(p.screening.items())]))
+        return page("profile", "/profile", "".join(parts))
+
+    def lessons_view(self) -> bytes:
+        rows = [[e(l.get("at", "")[:16]), e(l.get("ats", "")), e(l.get("company", "")),
+                 e(l.get("scope", "")), e(l.get("observation", ""))[:110],
+                 e(l.get("fix", ""))[:110]]
+                for l in reversed(read_jsonl(self.data / "lessons.jsonl"))]
+        return page("lessons", "/lessons",
+                    "<h2>what runs learned, per ATS</h2>"
+                    + table(["when", "ats", "company", "scope", "observation", "fix"],
+                            rows, "no lessons.jsonl yet"))
+
+    def log_view(self) -> bytes:
+        f = self.data / "notifications.log"
+        body = f.read_text()[-40000:] if f.exists() else ""
+        return page("notifications", "/log",
+                    "<h2>notifications sent or attempted</h2>"
+                    + (f"<pre>{e(body)}</pre>" if body else
+                       '<div class=empty>no notifications.log yet</div>'))
+
+    def serve_file(self, rel: str) -> tuple[bytes, str] | None:
+        """Serve a screenshot or the resume PDF, confined to the data dir.
+
+        The path comes off the URL, so it is untrusted: resolve it and refuse
+        anything that lands outside `data/`, or a symlink pointing out of it.
+        """
+        root = self.data.resolve()
+        try:
+            target = (root / unquote(rel)).resolve()
+            target.relative_to(root)
+        except (ValueError, OSError):
+            return None
+        if not target.is_file() or target.suffix.lower() not in (".png", ".pdf", ".jpg"):
+            return None
+        mime = {".png": "image/png", ".jpg": "image/jpeg",
+                ".pdf": "application/pdf"}[target.suffix.lower()]
+        return target.read_bytes(), mime
+
+
+# -- server --------------------------------------------------------------
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def __init__(self, dash: Dash, *a: Any, **kw: Any) -> None:
+        self.dash = dash
+        super().__init__(*a, **kw)
+
+    def log_message(self, *a: Any) -> None:  # quiet; structlog owns stdout
+        pass
+
+    def _send(self, body: bytes, mime: str = "text/html; charset=utf-8",
+              status: int = 200) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:  # noqa: N802
+        u = urlparse(self.path)
+        path, qs = u.path, parse_qs(u.query)
+        d = self.dash
+        try:
+            if path == "/":
+                self._send(d.overview())
+            elif path.startswith("/app/"):
+                self._send(d.app_detail(unquote(path[5:])))
+            elif path == "/answers":
+                self._send(d.answers_view(bool(qs.get("blank"))))
+            elif path == "/profile":
+                self._send(d.profile_view())
+            elif path == "/lessons":
+                self._send(d.lessons_view())
+            elif path == "/log":
+                self._send(d.log_view())
+            elif path.startswith("/f/"):
+                got = d.serve_file(path[3:])
+                if got is None:
+                    self._send(b"not found", "text/plain", 404)
+                else:
+                    self._send(*got)
+            else:
+                self._send(page("404", "/", '<div class=empty>no such page</div>'),
+                           status=404)
+        except Exception as exc:  # noqa: BLE001
+            self._send(page("error", "/", f'<pre class=bad>{e(repr(exc))}</pre>'),
+                       status=500)
+
+
+def serve(data_dir: str | Path = "data", profile: str | Path = "config/profile.yaml",
+          *, port: int = 8765, open_browser: bool = True) -> None:
+    dash = Dash(Path(data_dir), Path(profile))
+    while True:
+        try:
+            httpd = ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, dash))
+            break
+        except OSError as exc:
+            if getattr(exc, "errno", None) not in (48, 98) or port > 8785:
+                raise
+            port += 1
+    url = f"http://127.0.0.1:{port}/"
+    print(f"jobbot dashboard on {url}   (read-only, loopback only; ctrl-c to stop)")
+    if open_browser:
+        threading.Timer(0.4, webbrowser.open, [url]).start()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped")
+    finally:
+        httpd.server_close()
+
+
+def demo() -> None:
+    """Self-check: the path guard, and that every view renders on real shapes."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "data"
+        (root / "applications" / "greenhouse_42" / "screenshots").mkdir(parents=True)
+        (root / "applications.csv").write_text(
+            "job_id,company,title,ats,status,match_score,questions_total,"
+            "questions_answered,questions_flagged,heal_rounds,discovered_at\n"
+            "greenhouse:42,Acme,Software Engineer,greenhouse,confirmed,0.82,14,14,0,1,"
+            "2026-09-08T10:00:00+00:00\n")
+        (root / "answers.csv").write_text(
+            "recorded_at,job_id,company,title,ats,job_url,field_label,field_kind,"
+            "required,answer,source,confidence,rationale,left_blank,blank_reason\n"
+            "2026-09-08T10:00:00+00:00,greenhouse:42,Acme,SWE,greenhouse,,First Name,"
+            "text,True,Jane,profile,1.0,profile identity,False,\n")
+        d = root / "applications" / "greenhouse_42"
+        (d / "answers.json").write_text(json.dumps(
+            [{"label": "First Name", "value": "Jane", "source": "profile",
+              "confidence": 1.0, "rationale": "profile identity",
+              "needs_human": False, "blocked_reason": "", "required": True}]))
+        (d / "verification.json").write_text(json.dumps(
+            {"ready": True, "summary": "clean", "issues": [], "heal_rounds": 1,
+             "unfilled_required": [], "validation_errors": []}))
+        (d / "screenshots" / "cp1_0.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (root / "lessons.jsonl").write_text(json.dumps(
+            {"at": "2026-09-08T10:00:00+00:00", "ats": "greenhouse", "company": "Acme",
+             "observation": "o", "fix": "f", "scope": "this_ats"}) + "\n")
+        (root / "notifications.log").write_text("--- sent\n")
+
+        dash = Dash(root, Path("config/profile.yaml"))
+        for name, out in (("overview", dash.overview()),
+                          ("detail", dash.app_detail("greenhouse_42")),
+                          ("answers", dash.answers_view(False)),
+                          ("blanks", dash.answers_view(True)),
+                          ("lessons", dash.lessons_view()),
+                          ("log", dash.log_view()),
+                          ("profile", dash.profile_view())):
+            assert out.startswith(b"<!doctype html>"), name
+            assert b"jobbot" in out, name
+        assert b"Software Engineer" in dash.overview()
+        assert b"Jane" in dash.app_detail("greenhouse_42")
+        assert b"no such audit dir" in dash.app_detail("nope")
+
+        # the guard: nothing outside data/ is reachable, however it is spelled
+        assert dash.serve_file("applications/greenhouse_42/screenshots/cp1_0.png")
+        for attack in ("../../../../etc/passwd", "..%2f..%2fetc%2fpasswd",
+                       "applications/../../secrets.env", "/etc/passwd",
+                       "applications/greenhouse_42/answers.json"):
+            assert dash.serve_file(attack) is None, attack
+        (root / "escape.png").symlink_to("/etc/hosts")
+        assert dash.serve_file("escape.png") is None or not Path("/etc/hosts").exists()
+    print("dashboard self-check ok")
+
+
+if __name__ == "__main__":
+    demo()

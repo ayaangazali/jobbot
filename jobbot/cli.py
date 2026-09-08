@@ -219,6 +219,15 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_dashboard(args) -> int:
+    """Local read-only web view of everything on disk."""
+    from jobbot.dashboard import serve
+
+    serve(Path(args.csv).parent, args.profile,
+          port=args.port, open_browser=not args.no_open)
+    return 0
+
+
 def cmd_stats(args) -> int:
     t = Tracker(args.csv)
     s = t.stats()
@@ -267,6 +276,11 @@ def main(argv: list[str] | None = None) -> int:
     rp = sub.add_parser("report", help="every answer entered, field by field")
     rp.add_argument("audit_dir", help="data/applications/<job_id>/")
     rp.set_defaults(func=cmd_report)
+
+    dash = sub.add_parser("dashboard", help="local web view of every run")
+    dash.add_argument("--port", type=int, default=8765)
+    dash.add_argument("--no-open", action="store_true", help="do not open a browser")
+    dash.set_defaults(func=cmd_dashboard)
 
     s = sub.add_parser("stats", help="summarize the tracker")
     s.set_defaults(func=cmd_stats)
