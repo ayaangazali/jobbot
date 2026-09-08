@@ -96,3 +96,21 @@ screening:
     prof, errs = validate(raw)
     assert prof is not None and not errs
     assert prof.can_answer("work_authorization")
+
+
+def test_a_project_with_only_a_repo_still_gets_a_link() -> None:
+    """The resume renders `url`; repo-only projects printed with no link."""
+    out = from_form({**BASE, "projects": [
+        {"name": "wirefmt", "repo": "github.com/me/wirefmt"},
+    ]})
+    assert out["projects"][0]["url"] == "https://github.com/me/wirefmt"
+
+
+def test_bare_domains_get_a_scheme() -> None:
+    """People dictate "github.com/me" -- a form field needs the scheme."""
+    out = from_form({**BASE, "identity": {
+        **BASE["identity"], "github": "github.com/me",
+        "linkedin": "https://linkedin.com/in/me",
+    }})
+    assert out["identity"]["github"] == "https://github.com/me"
+    assert out["identity"]["linkedin"] == "https://linkedin.com/in/me"

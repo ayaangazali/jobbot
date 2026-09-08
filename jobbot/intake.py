@@ -375,6 +375,10 @@ def _full_gaps(cur: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# identity.location fields, as the model reports them versus where they live.
+LOCATION_KEYS = frozenset({"city", "state", "country", "postal_code", "street"})
+
+
 def apply_patches(raw: dict[str, Any], patches: list[dict[str, Any]]) -> dict[str, Any]:
     """Merge accepted card patches into the on-disk profile shape.
 
@@ -394,9 +398,16 @@ def apply_patches(raw: dict[str, Any], patches: list[dict[str, Any]]) -> dict[st
     for p in patches:
         for key, val in p.items():
             if key == "identity":
-                # Created here, not up front, so no-patch stays an exact no-op.
-                out.setdefault("identity", {}).update(
-                    {k: v for k, v in val.items() if str(v).strip()})
+                # The extractor reports city/state/country/postal_code flat, but
+                # the record nests them under identity.location. Writing them
+                # flat meant pydantic dropped them on the floor: the card said
+                # "CITY San Francisco", you accepted it, and nothing arrived.
+                ident = out.setdefault("identity", {})
+                loc = ident.setdefault("location", {})
+                for k, v in val.items():
+                    if not str(v).strip():
+                        continue
+                    (loc if k in LOCATION_KEYS else ident)[k] = v
             elif key == "experience_add":
                 cur = out.setdefault("experience", [])
                 hit = next((x for x in cur if same_role(x, val)), None)

@@ -80,3 +80,29 @@ def test_cards_do_not_re_propose_what_is_already_there() -> None:
     assert "headline" not in kinds, "an unchanged value is not a decision"
     assert kinds["summary"]["body"] == "Two sentences."
     assert kinds["list"]["body"] == ["Urdu"], "only the genuinely new item"
+
+
+def test_flat_location_keys_land_in_identity_location() -> None:
+    """The card said "CITY San Francisco"; it has to actually arrive.
+
+    The extractor reports location flat, the record nests it. Writing it flat
+    meant pydantic silently dropped it -- an accepted card that did nothing.
+    """
+    out = apply_patches({}, [{"identity": {
+        "first_name": "Ayaan", "email": "a@b.com",
+        "city": "San Francisco", "state": "CA", "country": "United States",
+        "postal_code": "94107",
+    }}])
+    assert out["identity"]["first_name"] == "Ayaan"
+    assert out["identity"]["location"] == {
+        "city": "San Francisco", "state": "CA",
+        "country": "United States", "postal_code": "94107",
+    }
+
+
+def test_flat_location_merges_into_an_existing_location() -> None:
+    out = apply_patches(
+        {"identity": {"location": {"city": "Oakland", "country": "United States"}}},
+        [{"identity": {"city": "San Francisco", "state": "CA"}}])
+    assert out["identity"]["location"] == {
+        "city": "San Francisco", "state": "CA", "country": "United States"}

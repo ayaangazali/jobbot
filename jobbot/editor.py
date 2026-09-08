@@ -140,6 +140,18 @@ def _now_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+def _url(s: str) -> str:
+    """Add a scheme to a bare domain.
+
+    Dictation and resumes both produce "github.com/you/thing". A form field
+    expecting a URL, and an <a href> on the resume, both need the scheme.
+    """
+    s = (s or "").strip()
+    if not s or "://" in s or s.startswith("mailto:"):
+        return s
+    return "https://" + s.lstrip("/")
+
+
 def load_raw(path: Path) -> dict[str, Any]:
     """The YAML as-is, so the form shows what is on disk rather than defaults."""
     if not path.exists():
@@ -186,8 +198,12 @@ def from_form(data: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     ident = dict(data.get("identity") or {})
     loc = {k: str(v or "").strip() for k, v in (ident.pop("location", None) or {}).items()}
-    out["identity"] = {**{k: str(v or "").strip() for k, v in ident.items()},
-                       "location": loc}
+    out["identity"] = {
+        **{k: (_url(str(v or "")) if k in ("linkedin", "github", "website")
+               else str(v or "").strip())
+           for k, v in ident.items()},
+        "location": loc,
+    }
 
     for k in ("headline", "summary", "earliest_start", "work_preference",
               "timeline_notes", "how_heard", "why_this_company_notes"):
@@ -243,11 +259,15 @@ def from_form(data: dict[str, Any]) -> dict[str, Any]:
     for p in data.get("projects") or []:
         if not str(p.get("name") or "").strip():
             continue
+        # The resume renders `url`; a project that only has `repo` would print
+        # with no link at all, which is the one thing a reviewer wants to click.
+        url = str(p.get("url") or "").strip()
+        repo = str(p.get("repo") or "").strip()
         projects.append({
             "name": p["name"].strip(),
             "description": str(p.get("description") or "").strip(),
-            "url": str(p.get("url") or "").strip() or None,
-            "repo": str(p.get("repo") or "").strip() or None,
+            "url": _url(url or repo) or None,
+            "repo": _url(repo) or None,
             "tech": clean_list(p.get("tech")),
             "bullets": [b.strip() for b in (p.get("bullets") or []) if str(b).strip()],
         })

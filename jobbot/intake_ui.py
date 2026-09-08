@@ -57,7 +57,7 @@ transform-origin:left}
 .rail i.done{background:var(--ok-dim)}
 .rail i.now{background:var(--acc);transform:scaleX(1.12)}
 
-main{max-width:940px;margin:0 auto;padding:26px 20px 120px}
+main{max-width:940px;margin:0 auto;padding:26px 20px 150px}
 
 /* ---- steps: only one mounted at a time, so a transition is enough ---- */
 .step{display:none}
@@ -97,15 +97,16 @@ button.tiny{padding:3px 9px;font-size:11.5px}
 
 /* ---- dictation ---- */
 .dictate{position:relative}
-.dictate textarea{min-height:190px;resize:vertical;padding-right:60px;line-height:1.65}
-.mic{position:absolute;top:9px;right:9px;width:38px;height:38px;border-radius:50%;
-display:grid;place-items:center;padding:0;font-size:15px}
+.dictate textarea{min-height:190px;resize:vertical;line-height:1.65}
+.microw{display:flex;gap:10px;align-items:center;margin-bottom:9px;flex-wrap:wrap}
+.mic{display:inline-flex;gap:8px;align-items:center;position:relative}
+.mic svg{flex:none}
 .mic.live{background:#3a1c1f;border-color:#6d2b2b;color:#ff9d9b}
 /* Ring is the privacy signal: while the mic is open it must be unmissable.
    Constant motion, so linear; slow, so it reads as "ongoing" not "loading". */
-.mic.live::after{content:'';position:absolute;inset:-5px;border-radius:50%;
-border:1.5px solid #6d2b2b;animation:ring 1400ms linear infinite}
-@keyframes ring{0%{opacity:.85;transform:scale(.92)}100%{opacity:0;transform:scale(1.35)}}
+.mic.live::after{content:'';position:absolute;inset:-4px;border-radius:9px;
+border:1.5px solid #6d2b2b;animation:ring 1400ms linear infinite;pointer-events:none}
+@keyframes ring{0%{opacity:.85;transform:scale(.98)}100%{opacity:0;transform:scale(1.12)}}
 .interim{color:var(--dim);font-style:italic}
 .count{position:absolute;bottom:8px;right:26px;color:var(--dim);font-size:11px;
 pointer-events:none;background:#0d0f13;padding:0 4px;border-radius:4px}
@@ -150,6 +151,13 @@ font-variant-numeric:tabular-nums}
 .group>h2{font-size:11px;text-transform:uppercase;letter-spacing:1.1px;
 color:var(--dim);margin:0 0 9px;display:flex;align-items:center;gap:10px}
 .group>h2 .n{color:var(--dim2);font-weight:400}
+.bulk{display:flex;gap:9px;align-items:center;background:var(--panel);
+border:1px solid var(--line);border-radius:10px;padding:11px 14px;margin-bottom:18px;
+flex-wrap:wrap}
+.bulk .t{color:var(--dim2);font-size:12.5px;flex:1;min-width:180px}
+.saved{border:1px solid var(--ok-dim);background:#111a13;border-radius:10px;
+padding:13px 15px;margin-bottom:18px;font-size:12.5px;color:#bfe0c9}
+.saved .left{margin-top:8px;color:var(--dim2)}
 .prop{background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--line2);
 border-radius:9px;padding:13px 15px;margin-bottom:9px;
 animation:rise 220ms var(--ease-out) both;
@@ -189,11 +197,18 @@ animation-delay:calc(var(--i) * 50ms)}
 .q.answered{border-color:var(--ok-dim)}
 
 /* ---- sticky action bar ---- */
-.actions{position:fixed;left:0;right:0;bottom:0;z-index:30;
+/* The bar is a fixed full-width band. Without pointer-events:none its gradient
+   swallowed every click in the bottom ~84px of the viewport -- including the
+   mic button, which was therefore impossible to press. Only the controls
+   themselves should be clickable. */
+.actions{position:fixed;left:0;right:0;bottom:0;z-index:30;pointer-events:none;
 background:linear-gradient(transparent,rgba(11,12,15,.94) 42%);
 padding:22px 20px 18px;display:flex;justify-content:center}
-.actions .inner{width:100%;max-width:940px;display:flex;gap:13px;align-items:center}
-.msg{font-size:12.5px;color:var(--dim)}
+.actions .inner{width:100%;max-width:940px;display:flex;gap:13px;align-items:center;
+pointer-events:none}
+.actions button{pointer-events:auto}
+.msg{font-size:12.5px;color:var(--dim);min-width:0;overflow:hidden;
+text-overflow:ellipsis;white-space:nowrap}
 .msg.ok{color:var(--ok)}.msg.bad{color:var(--bad)}.msg.warn{color:var(--warn)}
 .spacer{flex:1}
 
@@ -256,10 +271,12 @@ const S = {
   extraLinks: [],
   files: [],          // {name, label, text, chars, error}
   dump: '',
-  cards: [], notes: [], questions: [],
+  cards: [], notes: [], questions: [], saved: null,
   msg: { text: '', cls: '' },
   decisions: {},      // cardId -> true (accept) | false (skip)
   answers: {},        // question index -> answer text
+  rounds: 0,          // how many organize passes have run
+  moreQuestions: [],  // held back rather than pushed at you again
 };
 
 function msg(text, cls = '') {
@@ -374,11 +391,16 @@ function drawSources() {
   mic.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" '
     + 'stroke="currentColor" stroke-width="2" stroke-linecap="round">'
     + '<rect x="9" y="2" width="6" height="11" rx="3"/>'
-    + '<path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>';
+    + '<path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>'
+    + '<span id="miclabel">Dictate</span>';
   mic.addEventListener('click', toggleMic);
-  wrap.append(ta, mic, $('span', { class: 'count', id: 'cc' }, txt(S.dump.length ? S.dump.length + ' chars' : '')));
+  dictCard.append($('div', { class: 'microw' }, [
+    mic,
+    $('span', { id: 'micnote', style: 'color:var(--dim);font-size:12px' }, txt('')),
+  ]));
+  wrap.append(ta, $('span', { class: 'count', id: 'cc' },
+    txt(S.dump.length ? S.dump.length + ' chars' : '')));
   dictCard.append(wrap);
-  dictCard.append($('div', { id: 'micnote', class: 'hint', style: 'margin-top:9px;color:var(--dim)' }, txt('')));
   root.append(dictCard);
   drawFiles();
 }
@@ -432,9 +454,19 @@ function toggleMic() {
   rec = new Rec();
   rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
   baseText = byId('dump').value;
-  rec.onstart = () => { recOn = true; byId('mic').classList.add('live'); note.textContent = 'listening — speak normally, it keeps up'; };
+  rec.onstart = () => {
+    recOn = true;
+    byId('mic').classList.add('live');
+    byId('miclabel').textContent = 'Stop';
+    note.textContent = 'listening — speak normally, it keeps up';
+  };
   rec.onerror = ev => { note.textContent = 'mic error: ' + ev.error; };
-  rec.onend = () => { recOn = false; byId('mic').classList.remove('live'); note.textContent = ''; };
+  rec.onend = () => {
+    recOn = false;
+    byId('mic').classList.remove('live');
+    byId('miclabel').textContent = 'Dictate';
+    note.textContent = '';
+  };
   rec.onresult = ev => {
     let done = '', interim = '';
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
@@ -527,14 +559,85 @@ function renderValue(card) {
   return $('div', { class: 'val' }, txt(b));
 }
 
+/* Decisions are applied to the one card that was clicked. Re-rendering the
+   whole list on every click destroyed and rebuilt every node, which restarted
+   the staggered entrance animation on all of them -- so a click looked like a
+   page flicker rather than a change of state. */
+function setDecision(id, val) {
+  S.decisions[id] = val;
+  const el = document.querySelector(`.prop[data-id="${id}"]`);
+  if (el) {
+    el.classList.toggle('yes', val === true);
+    el.classList.toggle('no', val === false);
+    el.querySelectorAll('.acts button').forEach(b => {
+      b.classList.toggle('on', (b.dataset.act === 'accept') === (val === true));
+    });
+  }
+  refreshCounts();
+}
+
+function decideMany(ids, val) {
+  for (const id of ids) setDecision(id, val);
+}
+
+function refreshCounts() {
+  for (const h of document.querySelectorAll('.group[data-kind]')) {
+    const kind = h.dataset.kind;
+    const mine = S.cards.filter(c => c.kind === kind);
+    const yes = mine.filter(c => S.decisions[c.id] === true).length;
+    const label = h.querySelector('h2 .n');
+    if (label) label.textContent = `· ${yes}/${mine.length}`;
+  }
+  drawActions();
+}
+
 function drawReview() {
   const root = byId('step-review');
   root.innerHTML = '';
-  root.append($('h1', {}, txt('Here is what it made of that')));
-  root.append($('p', { class: 'sub' }, txt(
-    'Nothing is saved yet. Accept what is right, skip what is not — each card '
-    + 'shows which file or which sentence it came from. Anything it had to '
-    + 'interpret is called out below rather than buried.')));
+  root.append($('h1', {}, txt(S.saved ? 'Saved' : 'Here is what it made of that')));
+  if (S.saved) {
+    const sv = S.saved;
+    const done = $('div', { class: 'saved' }, [
+      $('div', {}, txt(`In your profile now: ${sv.roles} roles, ${sv.years} years, `
+        + `${sv.screening} screening answers.`)),
+    ]);
+    if (sv.missing.length) {
+      // The only part intake cannot do for him, stated once, with the way to it.
+      done.append($('div', { class: 'left' }, [
+        txt(`${sv.missing.length} screening answers are still unset, and a run will `
+          + `not start without them. They are the only thing here that has to be `
+          + `you: `),
+        $('a', { href: '/edit#screening' }, txt('set them in the editor →')),
+      ]));
+    }
+    if (S.moreQuestions.length) {
+      done.append($('div', { class: 'left' }, [
+        $('button', { class: 'tiny ghost', onclick: () => {
+          S.questions = S.moreQuestions; S.moreQuestions = []; drawInterview();
+        } }, txt(`it has ${S.moreQuestions.length} more questions — ask me`)),
+      ]));
+    }
+    root.append(done);
+  }
+  root.append($('p', { class: 'sub' }, txt(S.saved
+    ? (S.cards.length
+        ? 'These are the ones you skipped. Accept any of them and save again, '
+          + 'or add more material from the start.'
+        : 'Everything you accepted is in the profile. Add more material any time '
+          + '— it merges, it does not overwrite.')
+    : 'Everything is already accepted — press save and you are done. Skip '
+      + 'anything that is wrong first; each card shows which file or which '
+      + 'sentence it came from.')));
+
+  if (S.cards.length) {
+    const ids = S.cards.map(c => c.id);
+    root.append($('div', { class: 'bulk' }, [
+      $('span', { class: 't' }, txt(
+        S.cards.length + ' proposals, all accepted by default.')),
+      $('button', { class: 'tiny', onclick: () => decideMany(ids, true) }, txt('accept everything')),
+      $('button', { class: 'tiny ghost', onclick: () => decideMany(ids, false) }, txt('skip everything')),
+    ]));
+  }
 
   if (!S.cards.length && !S.notes.length) {
     root.append($('div', { class: 'card' }, [$('p', { class: 'hint' }, txt(
@@ -547,17 +650,21 @@ function drawReview() {
   for (const [kind, label] of GROUPS) {
     const mine = S.cards.filter(c => c.kind === kind);
     if (!mine.length) continue;
-    const g = $('div', { class: 'group' });
-    const head = $('h2', {}, [txt(label), $('span', { class: 'n' }, txt('· ' + mine.length))]);
+    const g = $('div', { class: 'group', 'data-kind': kind });
+    const yes = mine.filter(c => S.decisions[c.id] === true).length;
+    const head = $('h2', {}, [txt(label),
+      $('span', { class: 'n' }, txt(`· ${yes}/${mine.length}`))]);
     head.append($('span', { class: 'spacer', style: 'flex:1' }));
-    head.append($('button', { class: 'tiny ghost', onclick: () => { mine.forEach(c => S.decisions[c.id] = true); drawReview(); } }, txt('accept all')));
-    head.append($('button', { class: 'tiny ghost', onclick: () => { mine.forEach(c => S.decisions[c.id] = false); drawReview(); } }, txt('skip all')));
+    const myIds = mine.map(c => c.id);
+    head.append($('button', { class: 'tiny ghost', onclick: () => decideMany(myIds, true) }, txt('accept all')));
+    head.append($('button', { class: 'tiny ghost', onclick: () => decideMany(myIds, false) }, txt('skip all')));
     g.append(head);
 
     for (const c of mine) {
       const d = S.decisions[c.id];
       const el = $('div', {
         class: 'prop' + (d === true ? ' yes' : d === false ? ' no' : ''),
+        'data-id': c.id,
         style: '--i:' + (n++ % 14),
       });
       const top = $('div', { class: 'top' }, [$('span', { class: 't' }, txt(c.title))]);
@@ -565,8 +672,10 @@ function drawReview() {
       el.append(top, renderValue(c));
       if (c.replaces) el.append($('div', { class: 'was' }, txt('replaces: ' + c.replaces.slice(0, 160))));
       const acts = $('div', { class: 'acts' }, [
-        $('button', { class: 'tiny' + (d === true ? ' on' : ''), onclick: () => { S.decisions[c.id] = true; drawReview(); } }, txt('accept')),
-        $('button', { class: 'tiny', onclick: () => { S.decisions[c.id] = false; drawReview(); } }, txt('skip')),
+        $('button', { class: 'tiny' + (d === true ? ' on' : ''), 'data-act': 'accept',
+          onclick: () => setDecision(c.id, true) }, txt('accept')),
+        $('button', { class: 'tiny' + (d === false ? ' on' : ''), 'data-act': 'skip',
+          onclick: () => setDecision(c.id, false) }, txt('skip')),
       ]);
       el.append(acts);
       g.append(el);
@@ -588,12 +697,21 @@ function drawReview() {
 
   if (S.questions.length) {
     const g = $('div', { class: 'group' });
-    g.append($('h2', {}, txt('It could go deeper if you answered these')));
-    g.append($('div', { class: 'card' }, [
-      $('p', { class: 'hint' }, txt(S.questions.length + ' questions, all optional. '
-        + 'Answering them is how the thin parts of the profile get filled in.')),
-      $('button', { class: 'ghost', onclick: () => drawInterview() }, txt('Answer them →')),
-    ]));
+    g.append($('h2', {}, txt('Optional — only if you want to go deeper')));
+    const box = $('div', { class: 'card' }, [
+      $('p', { class: 'hint' }, txt(
+        (S.saved ? 'Already saved. ' : 'Save first; this changes nothing about that. ')
+        + 'It has ' + S.questions.length + ' questions that would fill in the thin '
+        + 'parts, but the profile works without them.')),
+    ]);
+    const row = $('div', { style: 'display:flex;gap:9px;flex-wrap:wrap' }, [
+      $('button', { class: 'ghost', onclick: () => drawInterview() },
+        txt('Answer ' + S.questions.length + ' questions →')),
+      $('button', { class: 'tiny ghost', onclick: () => { S.questions = []; drawReview(); } },
+        txt("no thanks, I'm done")),
+    ]);
+    box.append(row);
+    g.append(box);
     root.append(g);
   }
   drawActions();
@@ -648,10 +766,18 @@ function drawActions() {
     bar.append($('button', { class: 'ghost', onclick: () => go('sources') }, txt('← back')));
     bar.append($('span', { class: 'spacer' }));
     bar.append($('span', { class: 'msg ' + S.msg.cls, id: 'msg' }, txt(S.msg.text)));
-    const b = $('button', { class: 'primary', onclick: applyAccepted },
-      txt(accepted ? `Save ${accepted} to profile` : 'Nothing accepted yet'));
+    const label = accepted ? `Save ${accepted} to profile`
+      : S.saved ? (S.cards.length ? 'Accept something to save it' : 'All saved')
+      : 'Nothing accepted yet';
+    const b = $('button', { class: 'primary', onclick: applyAccepted }, txt(label));
     b.disabled = !accepted;
     bar.append(b);
+    if (S.saved && !S.cards.length) {
+      bar.append($('button', { class: 'ghost', onclick: () => {
+        S.dump = ''; S.files = []; S.saved = null; S.notes = [];
+        drawSources(); go('sources');
+      } }, txt('Add more →')));
+    }
   } else {
     bar.append($('button', { class: 'ghost', onclick: () => go(S.cards.length ? 'review' : 'sources') }, txt('← back')));
     bar.append($('span', { class: 'spacer' }));
@@ -685,6 +811,7 @@ async function organize() {
   const out = await post('/api/intake/organize', sourcePayload());
   stopWorking();
   if (!out.ok) { go('sources'); msg(out.error || 'that did not work', 'bad'); return; }
+  S.rounds++;
   S.cards = out.cards; S.notes = out.notes || []; S.questions = out.questions || [];
   S.decisions = {};
   for (const c of S.cards) S.decisions[c.id] = true;   // opt-out, not opt-in
@@ -700,8 +827,12 @@ async function organizeAnswers() {
   const out = await post('/api/intake/organize', payload);
   stopWorking();
   if (!out.ok) { drawInterview(); msg(out.error || 'that did not work', 'bad'); return; }
+  S.rounds++;
   S.cards = out.cards; S.notes = out.notes || [];
-  S.questions = out.questions || [];
+  // Do NOT put a fresh batch of questions in front of you again. One answer
+  // round is enough to be useful; more only if you ask for it.
+  S.moreQuestions = out.questions || [];
+  S.questions = [];
   S.answers = {};
   S.decisions = {};
   for (const c of S.cards) S.decisions[c.id] = true;
@@ -728,9 +859,12 @@ async function applyAccepted() {
   Object.keys(S.decisions).forEach(k => {
     if (!S.cards.some(c => c.id === k)) delete S.decisions[k];
   });
+  S.saved = {
+    roles: out.roles, years: out.years, screening: out.screening_set, missing: m,
+  };
   drawReview();
-  msg(`saved — ${out.roles} roles, ${out.years}y, ${out.screening_set} screening answers`
-    + (m.length ? ` · still unset: ${m.join(', ')}` : ' · preflight clear'), m.length ? 'warn' : 'ok');
+  msg(m.length ? `saved · ${m.length} screening answers still need you`
+               : 'saved · preflight clear', m.length ? 'warn' : 'ok');
 }
 """
 
