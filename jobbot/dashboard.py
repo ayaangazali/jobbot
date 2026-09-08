@@ -711,8 +711,16 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(body)))
+        # The page IS the app -- markup, styles and script in one response. With
+        # no cache directive a browser is free to reuse an old copy, which makes
+        # a fixed bug look unfixed and is indistinguishable from "it's broken".
+        # Screenshots and PDFs under /f/ are content-addressed by path and safe
+        # to cache; everything else must be fresh.
+        if not mime.startswith(("image/", "application/pdf")):
+            self.send_header("Cache-Control", "no-store, must-revalidate")
         self.end_headers()
-        self.wfile.write(body)
+        if not getattr(self, "_head_only", False):
+            self.wfile.write(body)
 
     def _json(self, obj: Any, status: int = 200) -> None:
         self._send(json.dumps(obj, default=str).encode(),
@@ -762,6 +770,18 @@ class Handler(BaseHTTPRequestHandler):
             log.warning("dashboard.get_failed", path=path, error=repr(exc)[:300])
             self._send(page("error", "/", f'<pre class=bad>{e(repr(exc))}</pre>'),
                        status=500)
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        """Same headers as GET, no body.
+
+        BaseHTTPRequestHandler answers an unimplemented method with 501, which
+        is what any HEAD probe (curl -I, a health check, a proxy) got.
+        """
+        self._head_only = True
+        try:
+            self.do_GET()
+        finally:
+            self._head_only = False
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path

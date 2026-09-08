@@ -588,6 +588,17 @@ function refreshCounts() {
     const label = h.querySelector('h2 .n');
     if (label) label.textContent = `· ${yes}/${mine.length}`;
   }
+  const total = S.cards.length;
+  const yes = S.cards.filter(c => S.decisions[c.id] === true).length;
+  const count = byId('bulkcount');
+  if (count) {
+    count.textContent = total
+      ? `${yes} of ${total} accepted` + (yes === total ? ' — ready to save' : '')
+      : '';
+  }
+  const yesBtn = byId('bulkyes'), noBtn = byId('bulkno');
+  if (yesBtn) yesBtn.disabled = yes === total;
+  if (noBtn) noBtn.disabled = yes === 0;
   drawActions();
 }
 
@@ -631,11 +642,17 @@ function drawReview() {
 
   if (S.cards.length) {
     const ids = S.cards.map(c => c.id);
+    // The count is live and the buttons disable when there is nothing left to
+    // do. Cards arrive pre-accepted, so "accept everything" on a fresh review
+    // was a genuine no-op with no feedback -- a working button that looked dead.
     root.append($('div', { class: 'bulk' }, [
-      $('span', { class: 't' }, txt(
-        S.cards.length + ' proposals, all accepted by default.')),
-      $('button', { class: 'tiny', onclick: () => decideMany(ids, true) }, txt('accept everything')),
-      $('button', { class: 'tiny ghost', onclick: () => decideMany(ids, false) }, txt('skip everything')),
+      $('span', { class: 't', id: 'bulkcount' }, txt('')),
+      $('button', { class: 'tiny', id: 'bulkyes',
+        onclick: () => { decideMany(ids, true); msg(`accepted all ${ids.length}`, 'ok'); } },
+        txt('accept everything')),
+      $('button', { class: 'tiny ghost', id: 'bulkno',
+        onclick: () => { decideMany(ids, false); msg(`skipped all ${ids.length}`, 'warn'); } },
+        txt('skip everything')),
     ]));
   }
 
@@ -714,7 +731,7 @@ function drawReview() {
     g.append(box);
     root.append(g);
   }
-  drawActions();
+  refreshCounts();
 }
 
 /* ---------------- interview ---------------- */
