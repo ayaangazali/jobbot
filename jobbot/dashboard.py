@@ -28,6 +28,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
+import structlog
+
+log = structlog.get_logger(__name__)
+
 CSS = """
 :root{--bg:#0c0d10;--panel:#14161b;--line:#22252c;--fg:#d7dae0;--dim:#7c828e;
 --ok:#5ec27a;--warn:#e0b341;--bad:#e0605e;--acc:#6aa9f0}
@@ -82,7 +86,7 @@ margin-bottom:14px;color:var(--acc)}
 """
 
 NAV = [("/", "overview"), ("/answers", "answers"), ("/profile", "profile"),
-       ("/edit", "edit profile"), ("/lessons", "lessons"),
+       ("/edit", "edit profile"), ("/intake", "intake"), ("/lessons", "lessons"),
        ("/log", "notifications"), ("/status", "status")]
 
 # Single source of truth for what this server exposes. Rendered on /status and
@@ -95,6 +99,8 @@ ROUTES = [
      "what": "every answer given in your name (?blank=1 for just the gaps)"},
     {"path": "/profile", "method": "GET", "what": "read-only profile summary"},
     {"path": "/edit", "method": "GET", "what": "the profile editor form"},
+    {"path": "/intake", "method": "GET",
+     "what": "dump links, resumes and a dictated paragraph; review what the model extracts"},
     {"path": "/lessons", "method": "GET", "what": "what each run learned per ATS"},
     {"path": "/log", "method": "GET", "what": "notifications sent or attempted"},
     {"path": "/status", "method": "GET", "what": "this page: config checks + routes"},
@@ -108,6 +114,12 @@ ROUTES = [
     {"path": "/api/answers", "method": "GET", "what": "answers.csv as JSON"},
     {"path": "/api/resume-text", "method": "POST",
      "what": "PDF bytes in, extracted text out; never auto-fills the profile"},
+    {"path": "/api/intake/organize", "method": "POST",
+     "what": "dump + resumes + links in, reviewable proposal cards out"},
+    {"path": "/api/intake/questions", "method": "POST",
+     "what": "questions targeted at whatever this profile is missing"},
+    {"path": "/api/intake/apply", "method": "POST",
+     "what": "merge accepted cards into the profile and save"},
 ]
 
 TERMINAL = {"confirmed", "submitted"}
@@ -532,6 +544,56 @@ class Dash:
             fresh=not self.profile_path.exists(),
         )
 
+    def intake_view(self) -> bytes:
+        from jobbot import intake_ui
+
+        return intake_ui.render()
+
+    def _llm(self) -> Any:
+        """One client per request. Cheap, and keeps a dead key from poisoning
+        the whole server the way a cached instance would."""
+        from jobbot.llm.client import LLMClient
+
+        return LLMClient()
+
+    def intake_organize(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from jobbot import editor as ed
+        from jobbot import intake
+
+        raw = ed.load_raw(self.profile_path)
+        prop = intake.organize(
+            self._llm(),
+            dump=str(payload.get("dump") or ""),
+            resumes=payload.get("resumes") or [],
+            links=payload.get("links") or {},
+            answers=payload.get("answers") or [],
+            current=raw,
+        )
+        return {
+            "ok": True,
+            "cards": intake.to_cards(prop, ed.to_form(raw)),
+            "notes": prop.get("notes") or [],
+            "questions": prop.get("questions") or [],
+            "usage": prop.get("_usage") or {},
+        }
+
+    def intake_questions(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from jobbot import editor as ed
+        from jobbot import intake
+
+        return {"ok": True, "questions": intake.interview_questions(
+            self._llm(), current=ed.to_form(ed.load_raw(self.profile_path)),
+            dump=str(payload.get("dump") or ""))}
+
+    def intake_apply(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Merge accepted cards, then go out through the one validated save."""
+        from jobbot import editor as ed
+        from jobbot import intake
+
+        raw = ed.load_raw(self.profile_path)
+        merged = intake.apply_patches(raw, payload.get("patches") or [])
+        return ed.save(self.profile_path, ed.from_form(ed.to_form(merged)))
+
     def save_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
         from jobbot import editor as ed
 
@@ -671,6 +733,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(d.profile_view())
             elif path == "/edit":
                 self._send(d.editor_view(tailnet_url=self.dash.public_url))
+            elif path == "/intake":
+                self._send(d.intake_view())
             elif path == "/lessons":
                 self._send(d.lessons_view())
             elif path == "/log":
@@ -708,6 +772,21 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/profile":
                 self._json(self.dash.save_profile(json.loads(body or b"{}")))
+            elif path.startswith("/api/intake/"):
+                fn = {"organize": self.dash.intake_organize,
+                      "questions": self.dash.intake_questions,
+                      "apply": self.dash.intake_apply}.get(path.rsplit("/", 1)[-1])
+                if fn is None:
+                    self._json({"ok": False, "error": "no such endpoint"}, 404)
+                    return
+                try:
+                    self._json(fn(json.loads(body or b"{}")))
+                except Exception as exc:  # noqa: BLE001
+                    # The model call is the likely failure here -- a missing key,
+                    # a rate limit, a refusal. Report it to the page rather than
+                    # dropping the user back to a blank form with no reason.
+                    log.warning("intake.failed", path=path, error=repr(exc)[:300])
+                    self._json({"ok": False, "error": str(exc)[:400]})
             elif path == "/api/resume-text":
                 from jobbot.editor import resume_text
                 try:

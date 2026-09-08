@@ -253,8 +253,18 @@ def from_form(data: dict[str, Any]) -> dict[str, Any]:
         })
     out["projects"] = projects
 
+    # Two callers, two shapes: the browser form sends rows of
+    # {category, items}, the intake merge sends the stored {category: [...]}
+    # map. Accept both here rather than making each caller convert -- this is
+    # the only validated way into the file, so it is the right place to be
+    # tolerant.
     skills: dict[str, list[str]] = {}
-    for row in data.get("skills") or []:
+    raw_skills = data.get("skills") or []
+    rows = ([{"category": k, "items": v} for k, v in raw_skills.items()]
+            if isinstance(raw_skills, dict) else raw_skills)
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
         cat = str(row.get("category") or "").strip()
         items = clean_list(row.get("items"))
         if cat and items:
@@ -275,7 +285,12 @@ def from_form(data: dict[str, Any]) -> dict[str, Any]:
     }
 
     extra: dict[str, str] = {}
-    for row in data.get("extra") or []:
+    raw_extra = data.get("extra") or []
+    erows = ([{"label": k, "value": v} for k, v in raw_extra.items()]
+             if isinstance(raw_extra, dict) else raw_extra)
+    for row in erows:
+        if not isinstance(row, dict):
+            continue
         k = str(row.get("label") or "").strip()
         v = str(row.get("value") or "").strip()
         if k and v:
