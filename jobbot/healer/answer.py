@@ -306,6 +306,9 @@ def profile_digest(profile: Profile) -> str:
     if p.awards:
         lines += ["", "AWARDS & SELECTIVE PROGRAMS:"]
         lines += [f"- {x}" for x in p.awards]
+    if p.certifications:
+        lines += ["", "CERTIFICATIONS:"]
+        lines += [f"- {x}" for x in p.certifications]
     if p.summary:
         lines += ["", "SUMMARY:", p.summary]
     lines += ["", "PREFERENCES (usable for non-legal questions):", p.preferences_digest()]

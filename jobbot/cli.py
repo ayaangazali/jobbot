@@ -224,7 +224,8 @@ def cmd_dashboard(args) -> int:
     from jobbot.dashboard import serve
 
     serve(Path(args.csv).parent, args.profile,
-          port=args.port, open_browser=not args.no_open)
+          port=args.port, open_browser=not args.no_open,
+          tailscale=args.tailscale, host=args.host)
     return 0
 
 
@@ -280,6 +281,10 @@ def main(argv: list[str] | None = None) -> int:
     dash = sub.add_parser("dashboard", help="local web view of every run")
     dash.add_argument("--port", type=int, default=8765)
     dash.add_argument("--no-open", action="store_true", help="do not open a browser")
+    dash.add_argument("--tailscale", action="store_true",
+                      help="bind the Tailscale address so other devices on your "
+                           "tailnet can reach it (never 0.0.0.0)")
+    dash.add_argument("--host", default="127.0.0.1", help=argparse.SUPPRESS)
     dash.set_defaults(func=cmd_dashboard)
 
     s = sub.add_parser("stats", help="summarize the tracker")

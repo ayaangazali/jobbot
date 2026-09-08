@@ -8,7 +8,7 @@ Read-only on purpose. This shows what happened; it never edits a profile, never
 retries an application, never touches the browser. Nothing here can change what
 was said in the user's name, which is the one property worth keeping.
 
-stdlib only (`http.server`), bound to loopback. The data includes a full name,
+stdlib only (`http.server`), loopback by default. The data includes a full name,
 address, phone number and every answer given to an employer, so it does not go
 on a network interface.
 """
@@ -18,7 +18,7 @@ from __future__ import annotations
 import csv
 import html
 import json
-import socket
+import os
 import threading
 import webbrowser
 from datetime import datetime, timezone
@@ -82,7 +82,33 @@ margin-bottom:14px;color:var(--acc)}
 """
 
 NAV = [("/", "overview"), ("/answers", "answers"), ("/profile", "profile"),
-       ("/lessons", "lessons"), ("/log", "notifications")]
+       ("/edit", "edit profile"), ("/lessons", "lessons"),
+       ("/log", "notifications"), ("/status", "status")]
+
+# Single source of truth for what this server exposes. Rendered on /status and
+# walked by the self-check, so a route added without a description shows up.
+ROUTES = [
+    {"path": "/", "method": "GET", "what": "run tiles + every posting, auto-refreshing"},
+    {"path": "/app/<audit-dir>", "method": "GET",
+     "what": "one application: answers, verification, resume, screenshots"},
+    {"path": "/answers", "method": "GET",
+     "what": "every answer given in your name (?blank=1 for just the gaps)"},
+    {"path": "/profile", "method": "GET", "what": "read-only profile summary"},
+    {"path": "/edit", "method": "GET", "what": "the profile editor form"},
+    {"path": "/lessons", "method": "GET", "what": "what each run learned per ATS"},
+    {"path": "/log", "method": "GET", "what": "notifications sent or attempted"},
+    {"path": "/status", "method": "GET", "what": "this page: config checks + routes"},
+    {"path": "/f/<path>", "method": "GET",
+     "what": "a screenshot or resume PDF from data/ (png/jpg/pdf only)"},
+    {"path": "/api/status", "method": "GET", "what": "the config checks as JSON"},
+    {"path": "/api/profile", "method": "GET", "what": "current profile as JSON"},
+    {"path": "/api/profile", "method": "POST",
+     "what": "validate and save the profile; backs up the previous file first"},
+    {"path": "/api/applications", "method": "GET", "what": "applications.csv as JSON"},
+    {"path": "/api/answers", "method": "GET", "what": "answers.csv as JSON"},
+    {"path": "/api/resume-text", "method": "POST",
+     "what": "PDF bytes in, extracted text out; never auto-fills the profile"},
+]
 
 TERMINAL = {"confirmed", "submitted"}
 LIVE = {"filling", "prepared"}
@@ -199,6 +225,7 @@ class Dash:
     def __init__(self, data_dir: Path, profile_path: Path) -> None:
         self.data = data_dir
         self.profile_path = profile_path
+        self.public_url = ""      # set by serve(), shown in the editor header
 
     # sources
     def apps(self) -> list[dict[str, str]]:
@@ -488,6 +515,103 @@ class Dash:
                     + (f"<pre>{e(body)}</pre>" if body else
                        '<div class=empty>no notifications.log yet</div>'))
 
+    # -- editor ----------------------------------------------------------
+
+    def editor_view(self, tailnet_url: str = "") -> bytes:
+        from jobbot import editor as ed
+        from jobbot import editor_ui
+        from jobbot.profile import CORE_SCREENING
+
+        return editor_ui.render(
+            ed.to_form(ed.load_raw(self.profile_path)),
+            str(self.profile_path), ed.SCREENING_SPEC,
+            sorted(CORE_SCREENING), ed.PREF_SPEC, ed.WORK_PREF,
+            tailnet_url=tailnet_url,
+            # `to_form({})` is a non-empty dict, so ask the filesystem
+            # rather than testing the payload for truthiness.
+            fresh=not self.profile_path.exists(),
+        )
+
+    def save_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from jobbot import editor as ed
+
+        return ed.save(self.profile_path, ed.from_form(payload))
+
+    # -- json ------------------------------------------------------------
+
+    def api_profile(self) -> dict[str, Any]:
+        from jobbot import editor as ed
+
+        raw = ed.load_raw(self.profile_path)
+        out: dict[str, Any] = {"exists": bool(raw), "path": str(self.profile_path),
+                               "profile": ed.to_form(raw)}
+        prof, errors = ed.validate(raw) if raw else (None, ["no profile saved yet"])
+        out["valid"] = prof is not None
+        out["errors"] = errors
+        if prof is not None:
+            out["missing_core"] = prof.missing_legally_significant()
+            out["years"] = prof.total_years_experience
+        return out
+
+    def status(self) -> dict[str, Any]:
+        """What is configured, what is missing, and what every route is for."""
+        from jobbot import editor as ed
+        from jobbot.mail.gmail import CLIENT_SECRET, TOKEN_PATH
+
+        raw = ed.load_raw(self.profile_path)
+        prof, perrors = ed.validate(raw) if raw else (None, ["not saved yet"])
+        apps, ans = self.apps(), self.answers()
+
+        checks: list[dict[str, Any]] = [
+            {"name": "profile file", "ok": bool(raw),
+             "detail": str(self.profile_path) if raw else "not created yet — use Edit profile"},
+            {"name": "profile validates", "ok": prof is not None,
+             "detail": "; ".join(perrors)[:200] if prof is None else "ok"},
+            {"name": "core screening answers set",
+             "ok": bool(prof) and not prof.missing_legally_significant(),
+             "detail": ", ".join(prof.missing_legally_significant())
+                       if prof else "needs a profile first"},
+            {"name": "ANTHROPIC_API_KEY", "ok": bool(os.environ.get("ANTHROPIC_API_KEY")),
+             "detail": "set" if os.environ.get("ANTHROPIC_API_KEY") else
+                       "unset — `run` cannot call the model"},
+            {"name": "GEMINI_API_KEY (fallback)",
+             "ok": bool(os.environ.get("GEMINI_API_KEY")),
+             "detail": "set" if os.environ.get("GEMINI_API_KEY") else
+                       "unset — failover is disabled, primary is retried instead"},
+            {"name": "gmail client secret", "ok": CLIENT_SECRET.exists(),
+             "detail": str(CLIENT_SECRET) if CLIENT_SECRET.exists() else
+                       "missing — Workday email verification will stop"},
+            {"name": "gmail authorised", "ok": TOKEN_PATH.exists(),
+             "detail": str(TOKEN_PATH) if TOKEN_PATH.exists() else "not yet authorised"},
+            {"name": "github consent",
+             "ok": (Path.home() / ".jobbot" / "github_consent.json").exists(),
+             "detail": "granted" if (Path.home() / ".jobbot" / "github_consent.json").exists()
+                       else "not granted — portfolio projects are skipped"},
+            {"name": "tracker", "ok": (self.data / "applications.csv").exists(),
+             "detail": f"{len(apps)} postings, {len(ans)} answers logged"},
+        ]
+        return {
+            "ok": all(c["ok"] for c in checks[:4]),
+            "checks": checks,
+            "routes": ROUTES,
+            "counts": {"postings": len(apps), "answers": len(ans),
+                       "audit_dirs": len(list((self.data / "applications").glob("*")))
+                       if (self.data / "applications").is_dir() else 0},
+        }
+
+    def status_view(self) -> bytes:
+        s = self.status()
+        rows = [[('<span class=ok>ok</span>' if c["ok"] else '<span class=bad>needs you</span>'),
+                 e(c["name"]), e(c["detail"])] for c in s["checks"]]
+        routes = [[f'<a href="{e(r["path"])}">{e(r["path"])}</a>' if r["method"] == "GET"
+                   and "<" not in r["path"] else e(r["path"]),
+                   e(r["method"]), e(r["what"])] for r in s["routes"]]
+        return page("status", "/status",
+                    "<h2>configuration</h2>"
+                    + table(["", "check", "detail"], rows)
+                    + "<h2>every endpoint</h2>"
+                    + table(["path", "method", "what it returns"], routes))
+
     def serve_file(self, rel: str) -> tuple[bytes, str] | None:
         """Serve a screenshot or the resume PDF, confined to the data dir.
 
@@ -528,6 +652,10 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _json(self, obj: Any, status: int = 200) -> None:
+        self._send(json.dumps(obj, default=str).encode(),
+                   "application/json; charset=utf-8", status)
+
     def do_GET(self) -> None:  # noqa: N802
         u = urlparse(self.path)
         path, qs = u.path, parse_qs(u.query)
@@ -541,10 +669,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(d.answers_view(bool(qs.get("blank"))))
             elif path == "/profile":
                 self._send(d.profile_view())
+            elif path == "/edit":
+                self._send(d.editor_view(tailnet_url=self.dash.public_url))
             elif path == "/lessons":
                 self._send(d.lessons_view())
             elif path == "/log":
                 self._send(d.log_view())
+            elif path == "/status":
+                self._send(d.status_view())
+            elif path == "/api/status":
+                self._json(d.status())
+            elif path == "/api/profile":
+                self._json(d.api_profile())
+            elif path == "/api/applications":
+                self._json(d.apps())
+            elif path == "/api/answers":
+                self._json(d.answers())
             elif path.startswith("/f/"):
                 got = d.serve_file(path[3:])
                 if got is None:
@@ -555,23 +695,104 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(page("404", "/", '<div class=empty>no such page</div>'),
                            status=404)
         except Exception as exc:  # noqa: BLE001
+            log.warning("dashboard.get_failed", path=path, error=repr(exc)[:300])
             self._send(page("error", "/", f'<pre class=bad>{e(repr(exc))}</pre>'),
                        status=500)
 
+    def do_POST(self) -> None:  # noqa: N802
+        path = urlparse(self.path).path
+        # Cap the body: this is a local form, and an unbounded read on a socket
+        # is a hang waiting to happen.
+        length = min(int(self.headers.get("Content-Length") or 0), 25_000_000)
+        body = self.rfile.read(length) if length else b""
+        try:
+            if path == "/api/profile":
+                self._json(self.dash.save_profile(json.loads(body or b"{}")))
+            elif path == "/api/resume-text":
+                from jobbot.editor import resume_text
+                try:
+                    text = resume_text(body)
+                except Exception as exc:  # noqa: BLE001
+                    self._json({"ok": False, "error": str(exc)[:200]})
+                    return
+                self._json({"ok": True, "chars": len(text), "text": text})
+            else:
+                self._json({"ok": False, "error": "no such endpoint"}, 404)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("dashboard.post_failed", path=path, error=repr(exc)[:300])
+            self._json({"ok": False, "errors": [repr(exc)[:300]]}, 500)
+
+
+def tailscale_ip() -> str | None:
+    """This machine's Tailscale IPv4, if Tailscale is up.
+
+    Reads the interface rather than shelling out, so it works without the CLI
+    on PATH and cannot be fooled by a stale `tailscale status` cache.
+    """
+    import subprocess
+
+    for cmd in (["tailscale", "ip", "-4"],
+                ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "ip", "-4"]):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for line in r.stdout.splitlines():
+            ip = line.strip()
+            if ip.startswith("100."):
+                return ip
+    # Fall back to the CGNAT address on the utun interface.
+    try:
+        out = subprocess.run(["ifconfig"], capture_output=True, text=True,
+                             timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("inet 100."):
+            return line.split()[1]
+    return None
+
 
 def serve(data_dir: str | Path = "data", profile: str | Path = "config/profile.yaml",
-          *, port: int = 8765, open_browser: bool = True) -> None:
+          *, port: int = 8765, open_browser: bool = True,
+          host: str = "127.0.0.1", tailscale: bool = False) -> None:
+    """Serve the dashboard and editor.
+
+    `tailscale=True` binds the Tailscale interface address instead of loopback,
+    so another device on the same tailnet can reach it. It binds that address
+    specifically, never 0.0.0.0: the tailnet is device-authenticated, while
+    0.0.0.0 would also publish a form containing a home address, phone number
+    and every screening answer to whatever coffee-shop wifi the machine is on.
+    """
+    if tailscale:
+        ip = tailscale_ip()
+        if not ip:
+            raise RuntimeError(
+                "--tailscale given but no Tailscale IPv4 found. Is Tailscale "
+                "running and logged in? (`tailscale status`)")
+        host = ip
+
     dash = Dash(Path(data_dir), Path(profile))
     while True:
         try:
-            httpd = ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, dash))
+            httpd = ThreadingHTTPServer((host, port), partial(Handler, dash))
             break
         except OSError as exc:
             if getattr(exc, "errno", None) not in (48, 98) or port > 8785:
                 raise
             port += 1
-    url = f"http://127.0.0.1:{port}/"
-    print(f"jobbot dashboard on {url}   (read-only, loopback only; ctrl-c to stop)")
+
+    url = f"http://{host}:{port}/"
+    dash.public_url = url
+    scope = ("reachable from your tailnet only" if tailscale
+             else "this machine only")
+    # flush: over SSH stdout is a pipe, and the URL is the whole point of the
+    # first second of output.
+    print(f"jobbot dashboard  {url}", flush=True)
+    print(f"  editor          {url}edit", flush=True)
+    print(f"  status          {url}status", flush=True)
+    print(f"  scope           {scope}; ctrl-c to stop", flush=True)
     if open_browser:
         threading.Timer(0.4, webbrowser.open, [url]).start()
     try:

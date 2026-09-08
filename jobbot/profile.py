@@ -215,6 +215,10 @@ class Profile(BaseModel):
     # weight when generated prose no longer does.
     awards: list[str] = Field(default_factory=list)
     publications: list[str] = Field(default_factory=list)
+    certifications: list[str] = Field(default_factory=list)
+    # Spoken languages. Asked constantly by non-US and enterprise forms, and
+    # unanswerable from anything else in this record.
+    languages: list[str] = Field(default_factory=list)
     compensation: Compensation = Field(default_factory=Compensation)
 
     # Every legally significant answer lives here, and nowhere else.
@@ -223,6 +227,7 @@ class Profile(BaseModel):
     # Preferences that drive the fit filter.
     target_titles: list[str] = Field(default_factory=list)
     target_locations: list[str] = Field(default_factory=list)
+    target_companies: list[str] = Field(default_factory=list)
     remote_ok: bool = True
     onsite_ok: bool = True
     hybrid_ok: bool = True
@@ -237,7 +242,14 @@ class Profile(BaseModel):
     work_preference: str = ""         # "remote" | "hybrid" | "onsite" | "flexible"
     timeline_notes: str = ""
     how_heard: str = ""               # "Company website"
-    why_this_company_notes: str = ""  # raw material, not a canned answer   # apply at >=50% of listed requirements
+    why_this_company_notes: str = ""  # raw material, not a canned answer
+
+    # Anything else worth saying, as label -> fact. Every application invents
+    # its own questions, so no fixed set of fields covers them; whatever is put
+    # here reaches the model through `preferences_digest`, where it can be drawn
+    # on for a non-legal answer. It is NOT a place for screening answers: those
+    # only count from `screening`, where provenance is tracked.
+    extra: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("screening", mode="before")
     @classmethod
@@ -304,6 +316,15 @@ class Profile(BaseModel):
         if self.compensation.target_base:
             bits.append(f"Target base salary: {self.compensation.target_base} "
                         f"{self.compensation.currency}")
+        if self.languages:
+            bits.append(f"Languages spoken: {', '.join(self.languages)}")
+        if self.certifications:
+            bits.append(f"Certifications: {', '.join(self.certifications)}")
+        # Free-form facts last, so they read as additions to the record rather
+        # than as overrides of anything above.
+        for k, v in self.extra.items():
+            if str(v).strip():
+                bits.append(f"{k}: {v}")
         return "\n".join(bits)
 
     @property
