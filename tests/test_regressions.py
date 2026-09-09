@@ -173,3 +173,34 @@ def test_sponsorship_now_and_future_are_different_questions() -> None:
     assert now.profile_key == "requires_sponsorship_now"
     assert future.profile_key == "requires_sponsorship_future"
     assert now.legally_significant and future.legally_significant
+
+
+def test_a_live_profile_holder_is_named_a_dead_one_is_cleared(tmp_path) -> None:
+    """A run killed mid-flight leaves Chromium holding the persistent profile.
+
+    Every later run then died inside Playwright with "Opening in existing
+    browser session" -- no pid, no hint that the profile was the problem, and
+    no way to recover but to find the process by hand.
+    """
+    import os
+
+    from jobbot.browser.session import BrowserConfig, BrowserSession
+
+    prof = tmp_path / "main"
+    prof.mkdir()
+    sess = BrowserSession(BrowserConfig(profile_dir=prof))
+
+    assert sess._singleton_holder() is None, "no lock file at all is not a holder"
+
+    # a lock naming this very process: genuinely held
+    os.symlink(f"somehost-{os.getpid()}", prof / "SingletonLock")
+    assert sess._singleton_holder() == os.getpid()
+
+    # a lock naming a pid that cannot exist: stale, and clearable
+    (prof / "SingletonLock").unlink()
+    os.symlink("somehost-2147483647", prof / "SingletonLock")
+    (prof / "SingletonCookie").symlink_to("123")
+    assert sess._singleton_holder() is None
+    assert sess._clear_stale_lock()
+    assert not (prof / "SingletonLock").exists()
+    assert not (prof / "SingletonCookie").exists()

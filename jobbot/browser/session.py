@@ -69,11 +69,64 @@ class BrowserSession:
         self._launched_at: float | None = None
         self._start_lock = asyncio.Lock()
 
+    def _singleton_holder(self) -> int | None:
+        """PID currently holding this profile, if one is alive.
+
+        Chromium records the owner in `SingletonLock`, a symlink named
+        `<host>-<pid>`. Returns None when the lock is absent or its process is
+        gone -- i.e. when the lock is stale and safe to clear.
+        """
+        lock = self.config.profile_dir / "SingletonLock"
+        try:
+            target = os.readlink(lock)
+        except OSError:
+            return None
+        _, _, pid_s = target.rpartition("-")
+        try:
+            pid = int(pid_s)
+        except ValueError:
+            return None
+        try:
+            os.kill(pid, 0)          # signal 0: existence check, no effect
+        except ProcessLookupError:
+            return None
+        except PermissionError:
+            return pid               # alive, owned by someone else
+        return pid
+
+    def _clear_stale_lock(self) -> bool:
+        """Remove singleton files left by a process that no longer exists."""
+        removed = False
+        for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+            f = self.config.profile_dir / name
+            if f.is_symlink() or f.exists():
+                with contextlib.suppress(OSError):
+                    f.unlink()
+                    removed = True
+        if removed:
+            log.warning("browser.cleared_stale_lock", profile=str(self.config.profile_dir))
+        return removed
+
     async def start(self) -> None:
         async with self._start_lock:
             if self.ctx is not None:
                 return
             self.config.profile_dir.mkdir(parents=True, exist_ok=True)
+
+            # One persistent profile means one Chromium at a time. A run killed
+            # by Ctrl-C, an OOM reap, or a crashed harness leaves that Chromium
+            # alive holding the profile, and every later run then died on a raw
+            # "Opening in existing browser session" from deep inside Playwright
+            # -- no indication of which process to kill, or that the profile was
+            # even the problem.
+            holder = self._singleton_holder()
+            if holder is not None:
+                raise RuntimeError(
+                    f"the browser profile {self.config.profile_dir} is in use by "
+                    f"pid {holder} -- a previous run that did not shut down. "
+                    f"Close that window, or: kill {holder}"
+                )
+            self._clear_stale_lock()
 
             kwargs: dict[str, Any] = dict(
                 headless=self.config.headless,
