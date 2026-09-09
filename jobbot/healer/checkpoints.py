@@ -213,6 +213,42 @@ def knockout_scan(
 
 # -- checkpoint 2 ---------------------------------------------------------
 
+# What the page itself says about each control's validity. A screenshot cannot
+# distinguish a required-field accent from an error outline -- on Greenhouse
+# they look alike -- so the verifier was reporting correctly-filled fields as
+# blockers on the strength of a border colour, and the heal loop could never
+# clear them because nothing was wrong.
+_VALIDITY_JS = r"""
+(sels) => sels.map((sel) => {
+  let el = null;
+  try { el = document.querySelector(sel); } catch (e) { return null; }
+  if (!el) return null;
+  const aria = el.getAttribute('aria-invalid');
+  const native = (typeof el.checkValidity === 'function') ? !el.checkValidity() : false;
+  return {
+    sel,
+    invalid: aria === 'true' || native,
+    message: el.validationMessage || '',
+    value_len: (el.value || '').length,
+  };
+}).filter(Boolean)
+"""
+
+
+async def field_validity(page: Any, form: ParsedForm) -> dict[str, dict[str, Any]]:
+    """Per-field validity as the DOM reports it, keyed by field_id."""
+    sels = [f.selector for f in form.fields if f.selector]
+    if not sels:
+        return {}
+    try:
+        rows = await page.evaluate(_VALIDITY_JS, sels)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("checkpoint2.validity_unavailable", error=str(exc)[:120])
+        return {}
+    by_sel = {r["sel"]: r for r in rows}
+    return {f.field_id: by_sel[f.selector]
+            for f in form.fields if f.selector in by_sel}
+
 async def checkpoint_verify(
     page: Any, llm: LLMClient, profile: Profile, form: ParsedForm,
     answers: list[ProposedAnswer], shots_dir: str | Path, round_no: int = 0,
@@ -220,6 +256,7 @@ async def checkpoint_verify(
     """Re-read the filled form and decide whether it is safe to submit."""
     shots_dir = Path(shots_dir)
     pc = await cap.capture(page, shots_dir, prefix=f"cp2_r{round_no}")
+    validity = await field_validity(page, form)
 
     from jobbot.healer.answer import profile_digest
     intended = []
@@ -239,6 +276,7 @@ async def checkpoint_verify(
             "Values we intended to enter:\n" + json.dumps(intended, indent=1)[:9000]
             + "\n\nAccessibility outline of the filled page:\n"
             + (pc.aria[:16000] or "(unavailable)")
+            + _validity_block(form, validity)
             + "\n\nCheck every visible field. Report a problem for anything that is: "
               "empty but required; showing a validation error; holding a value that "
               "contradicts the profile; visibly truncated; or placed in the wrong "
@@ -273,6 +311,31 @@ async def checkpoint_verify(
              blockers=len(v.blockers), warnings=len(v.issues) - len(v.blockers),
              unfilled=len(v.unfilled_required))
     return v, pc
+
+
+def _validity_block(form: ParsedForm, validity: dict[str, dict[str, Any]]) -> str:
+    """Tell the verifier what the page reports, and that it outranks a colour."""
+    if not validity:
+        return ""
+    by_id = {f.field_id: f for f in form.fields}
+    invalid = [(by_id[k].label, v["message"]) for k, v in validity.items()
+               if v["invalid"] and k in by_id]
+    lines = [
+        "\n\nTHE PAGE'S OWN VALIDATION STATE (authoritative -- this is the form "
+        "and the browser reporting on themselves, not an appearance):",
+    ]
+    if invalid:
+        lines.append("These fields are reporting INVALID:")
+        lines += [f"  - {lab}: {msg or 'no message given'}" for lab, msg in invalid]
+    else:
+        lines.append(f"  All {len(validity)} controls report VALID.")
+    lines.append(
+        "Do not raise a validation blocker for a field the page reports valid. A "
+        "coloured border alone is not evidence: required-field accents and error "
+        "outlines look alike, and a filled field styled as required is normal. "
+        "Report one only where the page says invalid, or where you can read the "
+        "actual error text.")
+    return "\n".join(lines)
 
 
 async def heal(

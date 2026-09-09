@@ -310,8 +310,19 @@ def test_dry_run_applies_to_one_posting_and_records_everything(ws: Workspace) ->
         assert (audit / "verification.json").exists()
         answers = json.loads((audit / "answers.json").read_text())
         assert answers
-        values = {str(x.get("value")) for x in answers}
-        assert "None" not in values, "the literal string None must never be typed into a form"
+
+        # Only entries that were actually written count. A null value carrying
+        # needs_human is a field deliberately left blank -- the correct outcome
+        # for a question the profile cannot answer, not a defect.
+        submitted = [x for x in answers if not x.get("needs_human")]
+        assert submitted
+        assert all(x.get("value") is not None for x in submitted)
+        assert "None" not in {str(x["value"]) for x in submitted}, \
+            "the literal string None must never be typed into a form"
+        for x in answers:
+            if x.get("needs_human"):
+                assert x.get("value") is None and x.get("blocked_reason"), \
+                    f"a blank must say why it is blank: {x.get('label')}"
         emails = [x for x in answers if "mail" in (x.get("label") or "").lower()]
         if emails:
             assert emails[0]["value"] == "jane.doe@example.com"

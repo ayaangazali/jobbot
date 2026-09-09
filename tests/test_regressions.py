@@ -204,3 +204,36 @@ def test_a_live_profile_holder_is_named_a_dead_one_is_cleared(tmp_path) -> None:
     assert sess._clear_stale_lock()
     assert not (prof / "SingletonLock").exists()
     assert not (prof / "SingletonCookie").exists()
+
+
+def test_the_verifier_is_told_the_pages_own_validity_state() -> None:
+    """A colour cannot distinguish "required" from "invalid".
+
+    On Greenhouse a filled, valid, required field carries an accent that reads
+    as an error outline in a screenshot. The verifier reported it as a blocker,
+    the heal loop could not clear it (nothing was wrong), and the run could
+    never reach `prepared`. The DOM reported aria-invalid="false" throughout.
+    """
+    from jobbot.forms.model import FieldKind, FormField, ParsedForm
+    from jobbot.healer.checkpoints import _validity_block
+
+    form = ParsedForm(fields=[
+        FormField("a", "Are you open to relocation?", FieldKind.COMBOBOX,
+                  required=True, selector="#a"),
+        FormField("b", "Email", FieldKind.EMAIL, required=True, selector="#b"),
+    ])
+    all_valid = _validity_block(form, {
+        "a": {"invalid": False, "message": "", "value_len": 2},
+        "b": {"invalid": False, "message": "", "value_len": 9},
+    })
+    assert "All 2 controls report VALID" in all_valid
+    assert "coloured border alone is not evidence" in all_valid
+
+    one_bad = _validity_block(form, {
+        "a": {"invalid": True, "message": "Please select an item in the list", "value_len": 0},
+        "b": {"invalid": False, "message": "", "value_len": 9},
+    })
+    assert "reporting INVALID" in one_bad
+    assert "Are you open to relocation?: Please select an item" in one_bad
+
+    assert _validity_block(form, {}) == "", "no signal, no claim"
