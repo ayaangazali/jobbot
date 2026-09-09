@@ -121,7 +121,16 @@ async def fill_text(page: Any, field: FormField, value: str, *, sequential: bool
     else:
         await loc.fill(str(value))
     got = await loc.input_value()
-    ok = got.strip()[:40] == str(value).strip()[:40]
+    want = str(value).strip()
+    got_s = got.strip()
+    # Comparing only the first 40 characters could not see truncation: a 2000
+    # character essay written into a field with a maxlength passed the check on
+    # its opening words while the rest was silently dropped.
+    ok = got_s == want
+    if not ok and got_s[:40] == want[:40] and len(got_s) < len(want):
+        log.warning("fill.text_truncated", label=field.label[:50],
+                    wanted_chars=len(want), got_chars=len(got_s),
+                    max_length=field.max_length)
 
     if not ok and field.kind is FieldKind.PHONE:
         # Many phone widgets reformat or reject punctuation. Retry with bare
@@ -388,7 +397,11 @@ async def upload_file(page: Any, field: FormField, path: str | Path) -> bool:
     if not p.exists():
         raise FillError(f"file to upload does not exist: {p}")
 
-    for sel in (field.selector, "input[type=file]", "input[type='file']"):
+    # An empty selector is not a candidate: `page.locator("")` raises a CSS
+    # parse error that reads like a real failure in the logs.
+    for sel in (field.selector, "input[type=file]"):
+        if not sel:
+            continue
         try:
             loc = page.locator(sel).first
             if await loc.count():

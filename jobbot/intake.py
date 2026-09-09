@@ -105,6 +105,12 @@ ORGANIZE_TOOL: dict[str, Any] = {
         "target_titles": _STRS,
         "target_locations": _STRS,
         "target_companies": _STRS,
+        "work_arrangement": _obj({
+            "remote_ok": {"type": "boolean"},
+            "onsite_ok": {"type": "boolean"},
+            "hybrid_ok": {"type": "boolean"},
+            "willing_to_relocate": {"type": "boolean"},
+        }, []),
         "compensation": _obj({
             "target_base": _STR, "minimum_base": _STR, "currency": _STR,
         }),
@@ -168,6 +174,8 @@ RULES
 - Copy numbers exactly. "Cut p99 from 840ms to 95ms" stays those numbers. Never
   round, scale, recompute, or add a metric that is not in the source.
 - Never invent an employer, title, date, school, degree, or technology.
+- work_arrangement: set only what they actually said. "SF or remote" states
+  remote_ok and onsite_ok; it says nothing about relocation. Omit the rest.
 - Never write a placeholder like "<UNKNOWN>", "N/A" or "TBD" into a field. If
   you do not have the value, leave the field out entirely -- it gets flagged
   for the candidate. A placeholder gets printed on a resume.
@@ -525,6 +533,11 @@ def to_cards(proposal: dict[str, Any], current: dict[str, Any]) -> list[dict[str
         fresh = [x for x in items if x.lower() not in have]
         if fresh:
             add("list", label, fresh, {f"{key}_add": fresh})
+
+    arr = {k: v for k, v in (proposal.get("work_arrangement") or {}).items()
+           if isinstance(v, bool)}
+    if arr:
+        add("arrangement", "Work arrangement", arr, arr)
 
     comp = {k: v for k, v in (proposal.get("compensation") or {}).items()
             if str(v).strip()}

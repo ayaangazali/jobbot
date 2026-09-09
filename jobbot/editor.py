@@ -233,8 +233,15 @@ def from_form(data: dict[str, Any]) -> dict[str, Any]:
               "publications", "certifications", "languages"):
         out[k] = clean_list(data.get(k))
 
+    # Only write a boolean the caller actually sent. bool(data.get(k)) turned an
+    # ABSENT key into False, so a profile built by intake -- whose payload has no
+    # such keys -- claimed the candidate was open to no arrangement at all:
+    # remote False, onsite False, hybrid False. That is not a default, it is a
+    # false statement, and it drove a wrong answer to "are you open to working
+    # in person?" on a real form. Absent now leaves the model default standing.
     for k in ("remote_ok", "onsite_ok", "hybrid_ok", "willing_to_relocate"):
-        out[k] = bool(data.get(k))
+        if k in data and data[k] is not None:
+            out[k] = bool(data[k])
 
     try:
         out["min_requirement_match"] = float(data.get("min_requirement_match") or 0.5)

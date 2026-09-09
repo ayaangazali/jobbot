@@ -187,3 +187,24 @@ def test_save_reports_untitled_roles(tmp_path) -> None:
     res = save(tmp_path / "p.yaml", from_form({**BASE, "experience": [
         {"company": "Example Corp", "title": "unknown"}]}))
     assert res["ok"] and res["untitled_roles"] == ["Example Corp"]
+
+
+def test_an_absent_boolean_keeps_the_model_default() -> None:
+    """`bool(data.get(k))` made "not mentioned" mean "no".
+
+    An intake payload carries no remote_ok/onsite_ok/hybrid_ok, so every
+    profile built from a dump claimed the candidate was open to no arrangement
+    at all. On a live form that produced a contradiction the verifier caught:
+    answered "Yes" to working in person, profile said open to nothing.
+    """
+    from jobbot.profile import Profile
+
+    silent = Profile.model_validate(from_form({**BASE}))
+    assert (silent.remote_ok, silent.onsite_ok, silent.hybrid_ok) == (True, True, True)
+    assert silent.willing_to_relocate is False, "the model's own default, not a coercion"
+
+    stated = Profile.model_validate(from_form({
+        **BASE, "remote_ok": True, "onsite_ok": False,
+        "hybrid_ok": True, "willing_to_relocate": True}))
+    assert (stated.remote_ok, stated.onsite_ok) == (True, False)
+    assert stated.willing_to_relocate is True, "an explicit choice still wins"

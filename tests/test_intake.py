@@ -106,3 +106,11 @@ def test_flat_location_merges_into_an_existing_location() -> None:
         [{"identity": {"city": "San Francisco", "state": "CA"}}])
     assert out["identity"]["location"] == {
         "city": "San Francisco", "state": "CA", "country": "United States"}
+
+
+def test_work_arrangement_is_proposed_as_its_own_card() -> None:
+    """"SF or remote" is a statement about arrangement; it must be reviewable."""
+    cards = {c["kind"]: c for c in to_cards(
+        {"work_arrangement": {"remote_ok": True, "onsite_ok": True}}, {})}
+    assert cards["arrangement"]["patch"] == {"remote_ok": True, "onsite_ok": True}
+    assert apply_patches({}, [cards["arrangement"]["patch"]])["remote_ok"] is True
