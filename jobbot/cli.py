@@ -148,6 +148,10 @@ def cmd_run(args) -> int:
     llm = LLMClient()
 
     cfg = RunConfig(
+        # Everything a run writes -- audit dirs, answers.csv, lessons.jsonl --
+        # lives beside the tracker. Defaulting to a bare "data" meant --csv moved
+        # the index but every artifact still landed in ./data of the cwd.
+        data_dir=Path(args.csv).parent,
         dry_run=not args.submit,
         make_github_project=not args.no_project,
         publish_project_private=args.private_projects,

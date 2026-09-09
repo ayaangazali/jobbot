@@ -356,6 +356,10 @@ class Orchestrator:
         det_answers, leftover = deterministic_answers(
             self.profile, form,
             published_salary=(post.salary_min, post.salary_max))
+        # A file input is not a question. Sending it to the model produced a
+        # needs_human "answer" for the Attach field, which then counted as
+        # answered -- so the resume was never attached to it.
+        leftover = [f for f in leftover if f.kind is not FieldKind.FILE]
         llm_answers = await asyncio.to_thread(
             model_answers, self.llm, self.profile, leftover,
             job_context=f"{post.title} at {post.company}\n\n{post.description[:4000]}",
@@ -403,10 +407,17 @@ class Orchestrator:
         # field, so without this the PDF is generated and then never uploaded --
         # which the verifier correctly refuses to submit.
         for f in form.fields:
-            if f.kind is FieldKind.FILE and not any(a.field_id == f.field_id for a in answers):
-                answers.append(ProposedAnswer(
-                    f.field_id, str(resume_pdf), AnswerSource.PROFILE, 1.0,
-                    "tailored resume for this role"))
+            if f.kind is not FieldKind.FILE:
+                continue
+            if any(a.field_id == f.field_id for a in answers):
+                continue
+            if re.search(r"cover\s*letter|transcript|portfolio", f.label, re.I):
+                # Not a resume slot. Leave it empty rather than upload the
+                # wrong document under a heading the reviewer will read.
+                continue
+            answers.append(ProposedAnswer(
+                f.field_id, str(resume_pdf), AnswerSource.PROFILE, 1.0,
+                "tailored resume for this role"))
 
         by_id = {f.field_id: f for f in form.fields}
         filled = 0

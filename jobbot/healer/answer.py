@@ -62,8 +62,14 @@ _IDENTITY_MAP: list[tuple[re.Pattern[str], str]] = [
 
 # Screening-question patterns -> profile.screening key.
 _SCREENING_MAP: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"require.*(visa|employment).*sponsor|sponsorship.*(now|future)|need sponsorship", re.I), "requires_sponsorship_future"),
-    (re.compile(r"\bsponsorship\b", re.I), "requires_sponsorship_now"),
+    # Two different legal facts. "Will you now or in the future require
+    # sponsorship?" is the FUTURE question; "Do you require visa sponsorship?"
+    # is the NOW question. The old first pattern (`require.*visa.*sponsor`)
+    # matched both, so a candidate on OPT -- now: No, future: Yes -- had the
+    # present-tense question answered with the future answer.
+    (re.compile(r"(in the future|now or (will you )?in the future|future).{0,60}sponsor"
+                r"|sponsor.{0,40}\bfuture\b", re.I), "requires_sponsorship_future"),
+    (re.compile(r"\bsponsor(ship)?\b", re.I), "requires_sponsorship_now"),
     (re.compile(r"legally.*(authoriz|entitled).*work|work authoriz|authorized to work", re.I), "work_authorization"),
     (re.compile(r"\bcitizen(ship)?\b", re.I), "citizenship"),
     (re.compile(r"\bvisa status\b", re.I), "visa_status"),
@@ -88,6 +94,27 @@ _SCREENING_MAP: list[tuple[re.Pattern[str], str]] = [
 ]
 
 _GPA = re.compile(r"\bgpa\b|grade point average", re.I)
+
+# What a closed custom dropdown reports as its only "option".
+_PLACEHOLDER_OPTION = re.compile(
+    r"^\s*(select|choose|please (select|choose)|pick one|--+|—|\.\.\.|)\s*(one|an option|\.\.\.|…)?\s*[.…]*\s*$",
+    re.I)
+
+
+def real_options(field: FormField) -> list[str]:
+    """The field's option labels, minus placeholders -- possibly nothing.
+
+    A react-select combobox renders its real options lazily, in a portal, only
+    once opened. Extracted from the closed DOM it reports exactly one option:
+    "Select...". Matching a confirmed answer against that list fails every
+    time, so the answer layer was flagging "'Yes' matches none of
+    ['Select...']" and giving up on fields the fill layer -- which opens the
+    menu and matches against what actually appears -- would have filled fine.
+
+    An empty return means "options unknown until fill time": pass the value
+    through and let `fill_combobox` resolve it live.
+    """
+    return [o for o in field.option_labels() if not _PLACEHOLDER_OPTION.match(o or "")]
 _SALARY = re.compile(r"salary|compensation|pay (expectation|range)|desired (pay|comp)", re.I)
 _YOE = re.compile(r"years? of (professional )?experience|how many years", re.I)
 
@@ -210,21 +237,22 @@ def deterministic_answers(
                 continue
 
             v = ans.value
-            # A yes/no combobox with no scraped options still needs mapping;
-            # assume the conventional pair rather than typing "True".
-            if isinstance(v, bool) and not f.options and f.kind in (
+            opts = real_options(f)
+            # A yes/no dropdown whose options are unknown until it is opened
+            # still needs mapping; use the conventional pair, never "True".
+            if isinstance(v, bool) and not opts and f.kind in (
                     FieldKind.COMBOBOX, FieldKind.SELECT, FieldKind.RADIO):
                 v = "Yes" if v else "No"
-            if f.options:
-                chosen = match_boolean(v, f.option_labels()) if isinstance(v, bool) else None
+            if opts:
+                chosen = match_boolean(v, opts) if isinstance(v, bool) else None
                 if chosen is None:
-                    chosen, _, _ = match_option(str(v), f.option_labels())
+                    chosen, _, _ = match_option(str(v), opts)
                 if chosen is None:
                     answers.append(ProposedAnswer(
                         f.field_id, None, AnswerSource.PROFILE, 0.0,
                         "confirmed value does not map to any offered option",
                         needs_human=True,
-                        blocked_reason=f"'{v}' matches none of {f.option_labels()[:6]}",
+                        blocked_reason=f"'{v}' matches none of {opts[:6]}",
                     ))
                     continue
                 v = chosen
@@ -392,10 +420,13 @@ def model_answers(
             continue
 
         v = a["value"]
-        if f.options:
-            chosen, score, _ = match_option(str(v), f.option_labels())
+        opts = real_options(f)
+        if isinstance(v, bool) and not opts:
+            v = "Yes" if v else "No"
+        if opts:
+            chosen, score, _ = match_option(str(v), opts)
             if chosen is None and isinstance(v, bool):
-                chosen = match_boolean(v, f.option_labels())
+                chosen = match_boolean(v, opts)
             if chosen is None:
                 out.append(ProposedAnswer(fid, None, AnswerSource.COMPOSED, 0.0,
                                           "no option matched", needs_human=True,

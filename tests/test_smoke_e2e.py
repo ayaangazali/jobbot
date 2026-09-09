@@ -27,6 +27,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -58,6 +59,11 @@ JANE_SCREENING = {
     "background_check_consent": True, "veteran_status": "I am not a protected veteran",
     "disability_status": "I do not wish to answer", "age_over_18": True,
     "education_degree": "Bachelor's Degree", "previously_employed_here": False,
+    # Also in profile.example.yaml. Greenhouse forms at larger companies ask all
+    # three; without them the run halts (correctly) before it fills anything.
+    "previously_interviewed_here": False,
+    "arbitration_agreement": "Yes",
+    "policy_acknowledgement": "Yes",
 }
 
 
@@ -258,10 +264,11 @@ def test_editor_sets_screening_and_preflight_clears(ws: Workspace) -> None:
 # ---------------------------------------------------------------- 3. discover
 
 def test_discover_finds_and_ranks_jobs(ws: Workspace) -> None:
+    assert ws.profile.exists(), "stages are sequential: this needs the profile stage 4 wrote"
     r = ws.cli("discover", "--source", BOARD, "--limit", "10", timeout=180)
     assert r.returncode == 0, r.stderr
-    lines = [l for l in r.stdout.splitlines() if l.strip() and not l.startswith(" fit")]
-    rows = [l for l in lines if l.split()[0].replace(".", "", 1).isdigit()]
+    # a ranked row starts with the fit score as printed by cmd_discover: `{m:5.2f}`
+    rows = [l for l in r.stdout.splitlines() if re.match(r"^\s*\d\.\d\d\s", l)]
     assert len(rows) >= 1, r.stdout
     assert "postings from 1 source(s)" in r.stdout
     fits = [float(l.split()[0]) for l in rows]
@@ -288,6 +295,8 @@ def test_dry_run_applies_to_one_posting_and_records_everything(ws: Workspace) ->
     a = attempted[0]
     print("attempted:", a["title"], "@", a["company"], "->", a["status"], "|", a["error"])
     audit = Path(a["audit_dir"])
+    assert audit.is_absolute() and ws.data in audit.parents, \
+        f"artifacts must live beside the tracker, not in ./data of the cwd: {audit}"
     assert audit.is_dir()
     assert (audit / "form.json").exists(), "checkpoint 1 must record the parsed form"
     form = json.loads((audit / "form.json").read_text())
@@ -317,5 +326,11 @@ def test_dry_run_applies_to_one_posting_and_records_everything(ws: Workspace) ->
     elif a["status"] == "needs_human":
         # legitimate outcome: the form asked something the fixture cannot answer
         assert (audit / "needs_human.txt").exists() or a["error"], a
+    elif a["status"] == "knockout_fail":
+        assert a["knockout_reason"], a
     else:
-        assert a["status"] in ("knockout_fail", "failed"), a["status"]
+        # `failed` is not an acceptable end state for "applying works". The one
+        # time this branch fired it was an Anthropic overload that the client
+        # classified as permanent and never retried.
+        err = (audit / "error.txt").read_text()[-1500:] if (audit / "error.txt").exists() else a["error"]
+        pytest.fail(f"application ended {a['status']!r}: {err}")

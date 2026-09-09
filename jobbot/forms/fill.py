@@ -318,8 +318,11 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
     with contextlib.suppress(Exception):
         got = ((await loc.input_value()) or "").strip()
         if not got and field.selector:
-            shown = await page.evaluate(_CONTROL_TEXT_JS, field.selector)
-            stuck = chosen.lower() in (shown or "").lower()
+            shown = (await page.evaluate(_CONTROL_TEXT_JS, field.selector) or "").lower()
+            # Either direction: a phone-country picker offers "United States +1"
+            # in its menu and then displays just "+1" in the control.
+            c = chosen.lower()
+            stuck = bool(shown) and (c in shown or shown in c)
             if not stuck:
                 log.warning("fill.combobox_did_not_stick", label=field.label[:50],
                             chose=chosen, shows=(shown or "")[:60])

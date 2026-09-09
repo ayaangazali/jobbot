@@ -387,7 +387,17 @@ def cached_system(text: str) -> list[dict[str, Any]]:
     return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
 
 
+# Anthropic error `type`s that clear on their own. Checked against the body
+# before the status code, because a mid-stream error event arrives on a 200
+# response: the SDK wraps it in a generic APIStatusError whose status_code is
+# that 200, so the status says nothing and the body says everything.
+_TRANSIENT_BODY = ("overloaded_error", "rate_limit_error", "api_error")
+
+
 def _is_transient(exc: Exception) -> bool:
+    blob = str(exc).lower()
+    if any(t in blob for t in _TRANSIENT_BODY):
+        return True
     name = type(exc).__name__
     if name in {
         "APIConnectionError",

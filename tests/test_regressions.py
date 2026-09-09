@@ -92,3 +92,84 @@ def test_selector_quoting_survives_apostrophes(label: str) -> None:
     # would be clicking an option that does not exist.
     import json
     assert json.loads(quoted) == label
+
+
+def test_a_mid_stream_overload_is_retried_not_fatal() -> None:
+    """The exact object the SDK raises for an `error` event during streaming.
+
+    The HTTP response was a 200 -- the error arrived inside the stream -- so
+    the SDK builds a generic APIStatusError with status_code=200. Trusting that
+    status over the body classified an Anthropic overload as permanent: zero
+    retries, and a real application marked failed seven seconds after the
+    resume had rendered.
+    """
+    import anthropic
+    import httpx
+
+    from jobbot.llm.client import _is_quota_exhausted, _is_transient
+
+    body = {"type": "error", "request_id": "req_x",
+            "error": {"type": "overloaded_error", "message": "Overloaded"}}
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    client = anthropic.Anthropic(api_key="test")
+    exc = client._make_status_error(f"{body}", body=body, response=httpx.Response(200, request=req))
+    assert type(exc).__name__ == "APIStatusError" and exc.status_code == 200
+    assert _is_transient(exc), "an overload must be retried"
+    assert not _is_quota_exhausted(exc), "and must not flip the run to the fallback"
+
+    # a genuine client error on the same path stays permanent
+    bad = client._make_status_error(
+        "{'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'bad'}}",
+        body={}, response=httpx.Response(400, request=req))
+    assert not _is_transient(bad)
+
+
+def test_a_closed_dropdowns_placeholder_is_not_an_option() -> None:
+    """Greenhouse's react-select reports exactly one option from the closed DOM:
+    "Select...". Matching a confirmed answer against that list fails every time,
+    so 8 of 11 blockers on a real form were "'Yes' matches none of
+    ['Select...']" -- fields the fill layer opens and matches live anyway.
+    """
+    from jobbot.forms.model import FieldKind, FieldOption, FormField
+    from jobbot.healer.answer import deterministic_answers, real_options
+    from jobbot.forms.model import ParsedForm
+    from jobbot.profile import Profile
+
+    closed = FormField("q1", "Do you require visa sponsorship?", FieldKind.COMBOBOX,
+                       required=True, options=[FieldOption("Select...")])
+    assert real_options(closed) == []
+    real = FormField("q2", "Veteran Status", FieldKind.SELECT,
+                     options=[FieldOption("Select..."), FieldOption("Yes"), FieldOption("No")])
+    assert real_options(real) == ["Yes", "No"], "a placeholder mixed into real options is dropped"
+
+    prof = Profile.model_validate({
+        "identity": {"first_name": "J", "last_name": "D", "email": "j@d.com"},
+        "screening": {"requires_sponsorship_now": False,
+                      "requires_sponsorship_future": False, "veteran_status": "No"},
+    })
+    answers, leftover = deterministic_answers(prof, ParsedForm(fields=[closed, real]))
+    by = {a.field_id: a for a in answers}
+    assert by["q1"].value == "No" and not by["q1"].needs_human, \
+        "unknown options: pass the conventional word through for fill time"
+    assert by["q2"].value == "No" and not by["q2"].needs_human
+    assert leftover == []
+
+
+def test_sponsorship_now_and_future_are_different_questions() -> None:
+    """Both wordings are verbatim from a live Greenhouse form.
+
+    A candidate on OPT answers now=No, future=Yes. The old first pattern
+    matched `require.*visa.*sponsor` and routed the present-tense question to
+    the future key -- a wrong answer to a legally significant question.
+    """
+    from jobbot.forms.model import FieldKind, FormField
+    from jobbot.healer.answer import classify
+
+    now = FormField("a", "Do you require visa sponsorship?", FieldKind.COMBOBOX)
+    future = FormField("b", "Will you now or will you in the future require employment "
+                            "visa sponsorship to work in the country in which the job "
+                            "you're applying for is located?", FieldKind.COMBOBOX)
+    classify(now); classify(future)
+    assert now.profile_key == "requires_sponsorship_now"
+    assert future.profile_key == "requires_sponsorship_future"
+    assert now.legally_significant and future.legally_significant
