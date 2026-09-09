@@ -201,8 +201,13 @@ class Orchestrator:
                 }) + "\n")
 
     def preflight(self) -> list[str]:
-        """Refuse to run autonomously with legally significant answers unset."""
-        return self.profile.missing_legally_significant()
+        """Everything that must be set before an autonomous run may start.
+
+        Identity is checked here rather than at save time: a half-filled draft
+        is a normal intermediate state, a half-filled submission is not.
+        """
+        return (self.profile.missing_identity()
+                + self.profile.missing_legally_significant())
 
     # -- one application --------------------------------------------------
 
@@ -251,7 +256,7 @@ class Orchestrator:
                 if await wd.needs_account(page):
                     res = await wd.ensure_account(
                         page, tenant=det.tenant or post.company,
-                        email=str(self.profile.identity.email),
+                        email=self.profile.identity.email_str,
                         gmail_enabled=self.cfg.gmail_enabled)
                     if not res.signed_in:
                         self.tracker.update(jid, status=Status.UNREACHABLE.value,
@@ -558,7 +563,7 @@ class Orchestrator:
         local = audit / "project"
         pub = publish(ident, plan, private=self.cfg.publish_project_private,
                       author_name=self.profile.identity.full_name,
-                      author_email=str(self.profile.identity.email),
+                      author_email=self.profile.identity.email_str,
                       keep_local=local, dry_run=True)
 
         smoke = smoke_test(pub.local_path, plan.get("run_command"))
@@ -582,7 +587,7 @@ class Orchestrator:
         shutil.rmtree(local, ignore_errors=True)
         pub = publish(ident, plan, private=self.cfg.publish_project_private,
                       author_name=self.profile.identity.full_name,
-                      author_email=str(self.profile.identity.email),
+                      author_email=self.profile.identity.email_str,
                       keep_local=local, dry_run=False)
 
         return ({"name": plan["repo_name"], "url": pub.url,

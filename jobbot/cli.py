@@ -78,7 +78,8 @@ def cmd_check(args) -> int:
     print("profile:")
     try:
         profile = Profile.load(args.profile)
-        print(f"  loaded {profile.identity.full_name} <{profile.identity.email}>")
+        print(f"  loaded {profile.identity.full_name or '(no name set)'} "
+              f"<{profile.identity.email_str or 'no email set'}>")
         print(f"  {len(profile.experience)} roles, {profile.total_years_experience}y total")
         gaps = profile.employment_gaps()
         if gaps:
@@ -180,7 +181,7 @@ def cmd_ats_test(args) -> int:
     profile = Profile.load(args.profile)
     i = profile.identity
     expect = {
-        "name": i.full_name, "email": str(i.email),
+        "name": i.full_name, "email": i.email_str,
         "phone": re.sub(r"[^0-9]", "", i.phone or "")[-10:],
         "location": i.location.city,
         "company": profile.experience[0].company if profile.experience else "",

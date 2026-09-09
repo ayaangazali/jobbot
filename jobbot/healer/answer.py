@@ -96,7 +96,7 @@ def _identity_value(profile: Profile, key: str) -> str:
     i = profile.identity
     return {
         "first_name": i.first_name, "last_name": i.last_name,
-        "full_name": i.full_name, "email": str(i.email), "phone": i.phone,
+        "full_name": i.full_name, "email": i.email_str, "phone": i.phone,
         "linkedin": i.linkedin or "", "github": i.github or "",
         "website": i.website or "", "city": i.location.city,
         "state": i.location.state, "country": i.location.country,

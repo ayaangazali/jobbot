@@ -140,6 +140,21 @@ def _now_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+_PLACEHOLDERS = {"", "-", "--", "n/a", "na", "tbd", "unknown", "<unknown>",
+                 "none", "null", "?", "???", "todo", "[unknown]"}
+
+
+def _no_placeholder(v: Any) -> str:
+    """Text, unless it is a stand-in for missing text.
+
+    A model asked for a required field it cannot source will fill it with
+    "<UNKNOWN>" rather than fail. That string would be typeset onto a resume
+    and typed into an employer's form, so it is treated as absent.
+    """
+    s = str(v or "").strip()
+    return "" if s.lower() in _PLACEHOLDERS else s
+
+
 def _url(s: str) -> str:
     """Add a scheme to a bare domain.
 
@@ -204,6 +219,11 @@ def from_form(data: dict[str, Any]) -> dict[str, Any]:
            for k, v in ident.items()},
         "location": loc,
     }
+    # An unset email must stay None. Coercing it to "" makes it a string that
+    # EmailStr then rejects ("must have an @-sign"), which failed the save for
+    # the exact case the optional field exists to allow.
+    if not out["identity"].get("email"):
+        out["identity"]["email"] = None
 
     for k in ("headline", "summary", "earliest_start", "work_preference",
               "timeline_notes", "how_heard", "why_this_company_notes"):
@@ -226,10 +246,14 @@ def from_form(data: dict[str, Any]) -> dict[str, Any]:
 
     exp = []
     for e in data.get("experience") or []:
-        if not (str(e.get("company") or "").strip() and str(e.get("title") or "").strip()):
+        # Company is the minimum that makes a role a role. Requiring a title too
+        # meant a role whose title no source stated was silently dropped -- the
+        # work vanished with no message.
+        company = _no_placeholder(e.get("company"))
+        if not company:
             continue
         exp.append({
-            "company": e["company"].strip(), "title": e["title"].strip(),
+            "company": company, "title": _no_placeholder(e.get("title")),
             "start": str(e.get("start") or "").strip() or None,
             "end": str(e.get("end") or "").strip() or None,
             "location": str(e.get("location") or "").strip(),
@@ -361,13 +385,24 @@ def save(path: Path, data: dict[str, Any]) -> dict[str, Any]:
     tmp.replace(path)
 
     missing = profile.missing_legally_significant()
+    # Saving a partial draft is allowed now, so the save has to say what is
+    # still missing -- otherwise an incomplete profile looks finished right up
+    # until a run refuses to start.
+    incomplete = profile.missing_identity()
+    undated = [f"{e.title or 'role'} at {e.company}" for e in profile.experience
+               if e.start is None]
+    untitled = [e.company for e in profile.experience if not e.title.strip()]
     log.info("editor.saved", path=str(path), backup=str(backup) if backup else None,
-             missing=len(missing))
+             missing=len(missing), incomplete=len(incomplete),
+             undated=len(undated), untitled=len(untitled))
     return {
         "ok": True,
         "path": str(path),
         "backup": str(backup) if backup else None,
         "missing_core": missing,
+        "missing_identity": incomplete,
+        "undated_roles": undated,
+        "untitled_roles": untitled,
         "roles": len(profile.experience),
         "years": profile.total_years_experience,
         "skills": sum(len(v) for v in profile.skills.values()),

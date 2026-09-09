@@ -158,6 +158,9 @@ flex-wrap:wrap}
 .saved{border:1px solid var(--ok-dim);background:#111a13;border-radius:10px;
 padding:13px 15px;margin-bottom:18px;font-size:12.5px;color:#bfe0c9}
 .saved .left{margin-top:8px;color:var(--dim2)}
+.failed{border:1px solid #5c2b2b;background:#1c1213;border-radius:10px;
+padding:13px 15px;margin-bottom:18px;color:#f0b3b1;font-size:12.5px}
+.failed ul{margin:7px 0 0;padding-left:19px}
 .prop{background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--line2);
 border-radius:9px;padding:13px 15px;margin-bottom:9px;
 animation:rise 220ms var(--ease-out) both;
@@ -621,6 +624,25 @@ function drawReview() {
         $('a', { href: '/edit#screening' }, txt('set them in the editor →')),
       ]));
     }
+    if (sv.identity.length) {
+      done.append($('div', { class: 'left' }, [
+        txt('An application cannot be submitted without '
+          + sv.identity.map(f => f.replace('identity.', '').replace('_', ' ')).join(', ')
+          + '. Saved anyway — add it in '),
+        $('a', { href: '/edit#identity' }, txt('the editor')),
+        txt(' or just say it here and organize again.'),
+      ]));
+    }
+    if (sv.undated.length) {
+      done.append($('div', { class: 'left' }, txt(
+        sv.undated.length + ' role(s) have no start date: ' + sv.undated.join('; ')
+        + '. Dates drive years-of-experience answers, so they are worth adding.')));
+    }
+    if ((sv.untitled || []).length) {
+      done.append($('div', { class: 'left' }, txt(
+        'No job title was stated for: ' + sv.untitled.join('; ')
+        + '. It was left blank rather than guessed — add it and organize again.')));
+    }
     if (S.moreQuestions.length) {
       done.append($('div', { class: 'left' }, [
         $('button', { class: 'tiny ghost', onclick: () => {
@@ -870,7 +892,18 @@ async function applyAccepted() {
   const patches = S.cards.filter(c => S.decisions[c.id] === true).map(c => c.patch);
   msg('saving…');
   const out = await post('/api/intake/apply', { patches });
-  if (!out.ok) { msg('not saved — ' + (out.errors || []).join(' | '), 'bad'); return; }
+  if (!out.ok) {
+    // The bar truncates, so a rejection has to be legible in the page itself.
+    msg('not saved — see the reason above', 'bad');
+    const root = byId('step-review');
+    const box = $('div', { class: 'failed' }, [
+      $('div', {}, txt('Not saved. Nothing was written, so nothing was lost.')),
+      $('ul', {}, (out.errors || [out.error || 'unknown error']).map(e => $('li', {}, txt(e)))),
+    ]);
+    root.insertBefore(box, root.firstChild);
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    return;
+  }
   const m = out.missing_core || [];
   S.cards = S.cards.filter(c => S.decisions[c.id] !== true);
   Object.keys(S.decisions).forEach(k => {
@@ -878,6 +911,8 @@ async function applyAccepted() {
   });
   S.saved = {
     roles: out.roles, years: out.years, screening: out.screening_set, missing: m,
+    identity: out.missing_identity || [], undated: out.undated_roles || [],
+    untitled: out.untitled_roles || [],
   };
   drawReview();
   msg(m.length ? `saved · ${m.length} screening answers still need you`

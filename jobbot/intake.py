@@ -74,7 +74,7 @@ ORGANIZE_TOOL: dict[str, Any] = {
                 "tech": _STRS,
                 "bullets": {**_STRS, "description": "Copy the candidate's own numbers exactly. Never introduce a metric that is not in the source."},
                 "source": {**_STR, "description": "Which input this came from, e.g. 'ml-resume.pdf' or 'dictation'."},
-            }, ["company", "title"]),
+            }, ["company"]),
         },
         "education": {
             "type": "array",
@@ -168,6 +168,9 @@ RULES
 - Copy numbers exactly. "Cut p99 from 840ms to 95ms" stays those numbers. Never
   round, scale, recompute, or add a metric that is not in the source.
 - Never invent an employer, title, date, school, degree, or technology.
+- Never write a placeholder like "<UNKNOWN>", "N/A" or "TBD" into a field. If
+  you do not have the value, leave the field out entirely -- it gets flagged
+  for the candidate. A placeholder gets printed on a resume.
 - Dates: use YYYY-MM-DD, first of the month when only a month is given. If a
   date is genuinely absent, omit it rather than estimating, and say so in notes.
 - Several resumes tailored for different roles describe the SAME career. Merge

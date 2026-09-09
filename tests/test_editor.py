@@ -114,3 +114,76 @@ def test_bare_domains_get_a_scheme() -> None:
     }})
     assert out["identity"]["github"] == "https://github.com/me"
     assert out["identity"]["linkedin"] == "https://linkedin.com/in/me"
+
+
+def test_a_partial_draft_saves_and_says_what_is_missing(tmp_path) -> None:
+    """Saving used to be all-or-nothing.
+
+    One missing email, or one role whose start date the source never stated,
+    rejected the entire submission -- so 14 accepted proposals were thrown away
+    over a field the extractor was explicitly told it could omit. A draft now
+    saves, and reports its own gaps.
+    """
+    path = tmp_path / "profile.yaml"
+    res = save(path, from_form({
+        **BASE,
+        "identity": {"first_name": "Ayaan", "last_name": "", "email": ""},
+        "experience": [{"company": "Example Corp", "title": "Infra Engineer",
+                        "bullets": ["Cut p99 840ms -> 95ms"]}],
+    }))
+    assert res["ok"], res
+    assert res["missing_identity"] == ["identity.last_name", "identity.email"]
+    assert res["undated_roles"] == ["Infra Engineer at Example Corp"]
+    assert path.exists(), "the work must be on disk, not discarded"
+
+
+def test_an_unset_email_is_none_not_empty_string() -> None:
+    """"" is a str, and EmailStr rejects it -- which broke the optional field."""
+    assert from_form({**BASE, "identity": {"first_name": "A"}})["identity"]["email"] is None
+
+
+def test_a_malformed_email_is_still_rejected(tmp_path) -> None:
+    """Optional is not the same as unvalidated."""
+    path = tmp_path / "profile.yaml"
+    res = save(path, from_form({**BASE, "identity": {
+        **BASE["identity"], "email": "not-an-email"}}))
+    assert not res["ok"]
+    assert not path.exists()
+
+
+def test_an_undated_role_does_not_break_the_date_maths() -> None:
+    p = Profile.model_validate(from_form({**BASE, "experience": [
+        {"company": "A", "title": "T"},                      # no dates at all
+        {"company": "B", "title": "U", "start": "2023-01-01", "end": "2024-01-01"},
+    ]}))
+    assert p.total_years_experience == 1.0, "the undated role is skipped, not fatal"
+    assert p.employment_gaps() == []
+
+
+def test_the_run_refuses_what_the_save_allowed() -> None:
+    """The gate moved to run time; it must actually be there."""
+    p = Profile.model_validate(from_form({
+        **BASE, "identity": {"first_name": "", "last_name": "", "email": ""}}))
+    assert p.missing_identity() == [
+        "identity.first_name", "identity.last_name", "identity.email"]
+
+
+def test_a_placeholder_title_is_treated_as_absent() -> None:
+    """A model filling a required field it cannot source writes "<UNKNOWN>".
+
+    That string would be typeset onto a resume and typed into an employer's
+    form, so it counts as missing -- but the role itself must survive, because
+    requiring a title silently dropped real jobs.
+    """
+    out = from_form({**BASE, "experience": [
+        {"company": "Example Corp", "title": "<UNKNOWN>", "bullets": ["x"]},
+        {"company": "Tiny Startup", "title": "N/A"},
+    ]})
+    assert [e["company"] for e in out["experience"]] == ["Example Corp", "Tiny Startup"]
+    assert all(e["title"] == "" for e in out["experience"])
+
+
+def test_save_reports_untitled_roles(tmp_path) -> None:
+    res = save(tmp_path / "p.yaml", from_form({**BASE, "experience": [
+        {"company": "Example Corp", "title": "unknown"}]}))
+    assert res["ok"] and res["untitled_roles"] == ["Example Corp"]

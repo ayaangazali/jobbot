@@ -120,8 +120,14 @@ class Location(BaseModel):
 
 class WorkExperience(BaseModel):
     company: str
-    title: str
-    start: date
+    # A resume that says "Example Corp, 2024" without a title is real input.
+    # Requiring it pushed the extractor into writing "<UNKNOWN>", which would
+    # then print on a rendered resume.
+    title: str = ""
+    # Optional for the same reason as identity: a resume that says "2024" with
+    # no month, or a dictated role with no dates at all, is normal input. A
+    # required date meant one undated job rejected the entire save.
+    start: date | None = None
     end: date | None = None          # None == present
     location: str = ""
     bullets: list[str] = Field(default_factory=list)
@@ -181,9 +187,14 @@ class Compensation(BaseModel):
 
 
 class Identity(BaseModel):
-    first_name: str
-    last_name: str
-    email: EmailStr
+    # Intentionally not required. This file is a draft that gets filled in over
+    # several passes -- from a dictated paragraph, from a resume, by hand -- and
+    # a missing email used to fail the whole save, throwing away every other
+    # field with it. Completeness is enforced where it matters instead: the
+    # orchestrator refuses to start a run until these are present.
+    first_name: str = ""
+    last_name: str = ""
+    email: EmailStr | None = None
     phone: str = ""
     location: Location = Field(default_factory=Location)
     linkedin: str | None = None
@@ -195,7 +206,16 @@ class Identity(BaseModel):
 
     @property
     def full_name(self) -> str:
-        return f"{self.first_name} {self.last_name}"
+        return f"{self.first_name} {self.last_name}".strip()
+
+    @property
+    def email_str(self) -> str:
+        """The email as text, empty when unset.
+
+        `str(None)` is "None", and this value gets typed into real email fields
+        and printed on the resume, so it must never round-trip through str().
+        """
+        return str(self.email or "")
 
 
 class Profile(BaseModel):
@@ -277,6 +297,22 @@ class Profile(BaseModel):
     def can_answer(self, key: str) -> bool:
         return self.answer(key).usable_for(key)
 
+    def missing_identity(self) -> list[str]:
+        """Identity fields an application cannot be submitted without.
+
+        Checked by the orchestrator before a run, not by the editor on save:
+        a half-filled draft is a normal intermediate state, a half-filled
+        submission is not.
+        """
+        missing = []
+        if not self.identity.first_name.strip():
+            missing.append("identity.first_name")
+        if not self.identity.last_name.strip():
+            missing.append("identity.last_name")
+        if not self.identity.email_str:
+            missing.append("identity.email")
+        return missing
+
     def missing_legally_significant(self, keys: frozenset[str] | None = None) -> list[str]:
         """Screening keys with no confirmed answer.
 
@@ -337,11 +373,12 @@ class Profile(BaseModel):
         rejection, so overstating it is a false answer on a real application.
         Merge the intervals and measure the union instead.
         """
-        if not self.experience:
-            return 0.0
         spans = sorted(
-            (e.start, e.end or date.today()) for e in self.experience
+            (e.start, e.end or date.today())
+            for e in self.experience if e.start is not None
         )
+        if not spans:
+            return 0.0
         merged: list[list[date]] = []
         for start, end in spans:
             if merged and start <= merged[-1][1]:
@@ -354,7 +391,8 @@ class Profile(BaseModel):
     def employment_gaps(self, threshold_days: int = 183) -> list[tuple[date, date]]:
         """Gaps over ~6 months, the threshold ~48% of employers auto-screen on."""
         spans = sorted(
-            ((e.start, e.end or date.today()) for e in self.experience),
+            ((e.start, e.end or date.today())
+             for e in self.experience if e.start is not None),
             key=lambda s: s[0],
         )
         gaps: list[tuple[date, date]] = []
