@@ -165,6 +165,14 @@ def cmd_run(args) -> int:
             orch = Orchestrator(profile, session, llm, tracker, cfg)
             return await orch.run(posts, limit=args.limit)
         finally:
+            if args.keep_open:
+                # The window is the only way to inspect what was actually
+                # entered while the page is still live; screenshots come after
+                # the fact. Leaving it up holds the profile lock, so the next
+                # run cannot start until this window is closed.
+                print("\n--keep-open: browser left running. "
+                      "Close the window before the next run.")
+                await asyncio.Event().wait()
             await session.close()
 
     results = asyncio.run(go())
@@ -269,6 +277,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--source", action="append", required=True)
     r.add_argument("--limit", type=int, default=5)
     r.add_argument("--submit", action="store_true", help="actually submit (default: dry run)")
+    r.add_argument("--keep-open", action="store_true",
+                   help="leave the browser open after the run instead of closing it")
     r.add_argument("--no-project", action="store_true")
     r.add_argument("--private-projects", action="store_true")
     r.add_argument("--min-match", type=float, default=0.5)
