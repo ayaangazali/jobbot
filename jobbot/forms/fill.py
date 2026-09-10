@@ -102,7 +102,51 @@ async def _locate(page: Any, field: FormField, timeout: int = 8000) -> Any:
                 return cand
         except Exception:  # noqa: BLE001
             continue
+    # Last resort: find the block that asks this question and take the control
+    # inside it. Vision reports fields the DOM walk missed and gives us only a
+    # label, and an accessible-name lookup fails whenever the visible text is
+    # not wired to the input -- which is how a required consent checkbox went
+    # unchecked with "could not locate field by label".
+    sel = None
+    with contextlib.suppress(Exception):
+        sel = await page.evaluate(_BLOCK_CONTROL_JS, {"question": label[:160]})
+    if sel:
+        loc = page.locator(sel).first
+        with contextlib.suppress(Exception):
+            await loc.wait_for(state="visible", timeout=3000)
+            log.debug("fill.located_by_block", label=label[:50])
+            return loc
+
     raise FillError(f"could not locate field by label: {label[:60]!r}")
+
+
+# Find the form control that belongs to a question, by text proximity.
+_BLOCK_CONTROL_JS = r"""
+({question}) => {
+  const norm = s => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const q = norm(question);
+  if (q.length < 8) return null;
+  const needle = q.slice(0, 60);
+
+  const blocks = [...document.querySelectorAll('div, fieldset, section, li, label, p')]
+    .filter(el => {
+      const t = norm(el.innerText);
+      return t.includes(needle) && t.length < q.length + 500;
+    });
+  if (!blocks.length) return null;
+
+  for (const block of blocks.reverse()) {          // innermost first
+    const ctl = block.querySelector(
+      'input:not([type=hidden]), select, textarea, [role=checkbox], [role=combobox]');
+    if (ctl && ctl.getBoundingClientRect().width > 0) {
+      const k = 'jb' + Math.random().toString(36).slice(2, 9);
+      ctl.setAttribute('data-jobbot-pick', k);
+      return '[data-jobbot-pick="' + k + '"]';
+    }
+  }
+  return null;
+}
+"""
 
 
 async def _visible(page: Any, selector: str, timeout: int = 8000) -> Any:
@@ -319,6 +363,13 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
                 chosen, score, how = match_option(text, opts)
 
     if chosen is None:
+        # Record what it really offers. The parse could not see inside a menu
+        # that only exists once opened, so the answer was composed blind --
+        # "Yes" against a list of three full sentences. With the options on the
+        # field, the verifier can suggest one that exists.
+        if opts:
+            from jobbot.forms.model import FieldOption
+            field.options = [FieldOption(label=o) for o in opts[:25]]
         log.warning("fill.combobox_no_option", label=field.label[:50],
                     wanted=text[:40], seen=opts[:6])
         with contextlib.suppress(Exception):

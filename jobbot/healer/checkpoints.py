@@ -316,7 +316,13 @@ async def checkpoint_verify(
     for a in answers:
         f = by_id.get(a.field_id)
         if f is not None and a.submittable:
-            intended.append({"label": f.label[:110], "intended_value": str(a.value)[:200]})
+            row = {"label": f.label[:110], "intended_value": str(a.value)[:200]}
+            if f.options:
+                # Only a value from this list can be entered. Without it the
+                # verifier suggested "Yes" for a dropdown whose three choices
+                # were full sentences, and the healer had nothing to apply.
+                row["only_these_are_selectable"] = [o.label[:80] for o in f.options[:25]]
+            intended.append(row)
 
     r = llm.vision(
         system=cached_system(
