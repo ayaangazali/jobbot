@@ -989,6 +989,15 @@ async def apply_answer(
             return await upload_file(page, field, resume_path or str(v))
 
         if field.kind in (FieldKind.SELECT, FieldKind.MULTISELECT, FieldKind.COMBOBOX):
+            # A choice field vision reported but the DOM walk never saw has no
+            # control to drive: HP IQ's "How did you hear about HP IQ?" is a
+            # group of checkboxes -- A friend, TEDTalk, Campus Recruiting
+            # Event, Other -- and vision described it as one multiselect. With
+            # no selector there is nothing to open, so pick the option out of
+            # the block by its text, which is what fill_radio does.
+            if not field.selector:
+                if await fill_radio(page, field, v):
+                    return True
             if isinstance(v, bool):
                 # "True"/"False" match no real option. Map onto whatever this
                 # form calls yes and no before touching the widget.
