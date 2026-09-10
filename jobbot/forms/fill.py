@@ -314,9 +314,19 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
 
     before = set(await _visible_options(page))
     await loc.click()
-    await asyncio.sleep(0.45)
-    after = await _visible_options(page)
-    opts = [o for o in after if o not in before]
+
+    # Poll rather than snapshot once. A single 450ms look was enough on an idle
+    # machine and not during a run, where the same page, the same code and the
+    # same widget reported "no options" three rounds running while every
+    # isolated attempt found all three -- the menu simply had not painted yet.
+    after: list[str] = []
+    opts: list[str] = []
+    for _ in range(10):
+        await asyncio.sleep(0.3)
+        after = await _visible_options(page)
+        opts = [o for o in after if o not in before]
+        if opts:
+            break
 
     if not opts:
         # The click opened nothing, or opened and lost it again -- the humanised
@@ -328,9 +338,12 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
         with contextlib.suppress(Exception):
             await loc.focus()
             await loc.press("ArrowDown")
-            await asyncio.sleep(0.5)
-            after = await _visible_options(page)
-            opts = [o for o in after if o not in before]
+            for _ in range(8):
+                await asyncio.sleep(0.3)
+                after = await _visible_options(page)
+                opts = [o for o in after if o not in before]
+                if opts:
+                    break
         if opts:
             log.debug("fill.combobox_opened_by_key", label=field.label[:40], count=len(opts))
 
@@ -387,7 +400,8 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
             from jobbot.forms.model import FieldOption
             field.options = [FieldOption(label=o) for o in opts[:25]]
         log.warning("fill.combobox_no_option", label=field.label[:50],
-                    wanted=text[:40], seen=opts[:6])
+                    wanted=text[:40], seen=opts[:6],
+                    visible_before=len(before), visible_after=len(after))
         with contextlib.suppress(Exception):
             await page.keyboard.press("Escape")
         return False
