@@ -41,6 +41,7 @@ from jobbot.llm.client import LLMClient, cached_system
 from jobbot.llm.schemas import (
     KNOCKOUT_TOOL, PARSE_FORM_TOOL, POST_SUBMIT_TOOL, VERIFY_FORM_TOOL,
 )
+from jobbot.forms.matching import match_option
 from jobbot.profile import LEGALLY_SIGNIFICANT, Profile
 
 
@@ -470,7 +471,38 @@ async def heal(
                             suggested=str(issue.suggested_value)[:60])
                 continue
             from jobbot.forms.model import AnswerSource
-            patch = ProposedAnswer(f.field_id, issue.suggested_value,
+
+            value = issue.suggested_value
+            if f.options:
+                # Only a value from the list can be entered, and the verifier
+                # does invent ones that are not on it: for "How did you hear
+                # about this job?" it suggested "Company website / Careers
+                # page" where the six real choices were Grace Hopper, a career
+                # fair, word of mouth, Cloudflare social media, LinkedIn and
+                # Google. Snap it to a real option, and where nothing is close,
+                # let the model choose from the list rather than apply a value
+                # the control cannot hold.
+                labels = f.option_labels()
+                snapped, score, _ = match_option(str(value), labels)
+                if snapped is None:
+                    from jobbot.healer.answer import model_answers
+                    picked = await asyncio.to_thread(
+                        model_answers, llm, profile, [f],
+                        job_context="Choose one of this field's listed options, verbatim.")
+                    snapped = next(
+                        (str(a.value) for a in picked
+                         if a.submittable and match_option(str(a.value), labels)[0]),
+                        None)
+                    if snapped is not None:
+                        log.info("heal.model_chose_option", label=f.label[:50],
+                                 chose=snapped[:60])
+                if snapped is None:
+                    log.warning("heal.no_valid_option", label=f.label[:50],
+                                suggested=str(value)[:50], options=labels[:6])
+                    continue
+                value = snapped
+
+            patch = ProposedAnswer(f.field_id, value,
                                    AnswerSource.COMPOSED, 0.6, "healer fix")
             if await apply_answer(page, f, patch, resume_path=resume_path):
                 # In place, not a rebind: the caller records this list as the
