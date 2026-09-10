@@ -359,6 +359,71 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
     return True
 
 
+# Find the option to click WITHIN one radio group. Returns the input's id.
+#
+# Radio options are labelled "Yes" and "No" on every question, so a page-wide
+# `label:has-text("Yes")` resolves to the first Yes on the page -- which is a
+# different question's. On a form asking both "are you authorised to work" and
+# "will you require sponsorship", one answer was clicked twice and the other
+# left blank, and a blank required question is a blocker that never clears.
+# The group is identified by the radio `name` the DOM walk already grouped on,
+# falling back to whichever group's surrounding text matches the question.
+_RADIO_PICK_JS = r"""
+({selector, question, choice}) => {
+  const norm = s => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const want = norm(choice);
+  const radios = [...document.querySelectorAll('input[type=radio]')];
+  if (!radios.length) return null;
+
+  const labelOf = r => {
+    if (r.id) {
+      const l = document.querySelector('label[for="' + (window.CSS ? CSS.escape(r.id) : r.id) + '"]');
+      if (l) return l.innerText;
+    }
+    const p = r.closest('label');
+    return p ? p.innerText : (r.value || '');
+  };
+
+  let name = null;
+  if (selector) {
+    try {
+      const e = document.querySelector(selector);
+      if (e && e.type === 'radio') name = e.name;
+    } catch (err) { /* a vision-invented selector need not parse */ }
+  }
+
+  let group = name ? radios.filter(r => r.name === name) : [];
+
+  if (!group.length && question) {
+    const qn = norm(question);
+    const words = qn.split(' ').filter(w => w.length > 3);
+    let best = null, bestScore = 0;
+    for (const n of [...new Set(radios.map(r => r.name))]) {
+      const g = radios.filter(r => r.name === n);
+      let holder = g[0];
+      for (let i = 0; i < 6 && holder && holder.parentElement; i++) {
+        holder = holder.parentElement;
+        if (norm(holder.innerText).length > qn.length / 2) break;
+      }
+      const txt = norm(holder ? holder.innerText : '');
+      const score = txt.includes(qn.slice(0, 40))
+        ? 1000 : words.filter(w => txt.includes(w)).length;
+      if (score > bestScore) { bestScore = score; best = g; }
+    }
+    if (bestScore > 0) group = best;
+  }
+  if (!group.length) return null;
+
+  const hit = group.find(r => norm(labelOf(r)) === want)
+           || group.find(r => norm(labelOf(r)).startsWith(want))
+           || group.find(r => norm(r.value) === want);
+  if (!hit) return null;
+  if (!hit.id) hit.id = 'jobbot-radio-' + Math.random().toString(36).slice(2);
+  return hit.id;
+}
+"""
+
+
 async def fill_radio(page: Any, field: FormField, value: Any) -> bool:
     """Choose within a radio group by clicking its LABEL, not the input.
 
@@ -369,24 +434,75 @@ async def fill_radio(page: Any, field: FormField, value: Any) -> bool:
     chosen = match_boolean(value, opts) if isinstance(value, bool) else None
     if chosen is None:
         chosen, _, _ = match_option(str(value), opts)
+    if chosen is None and isinstance(value, bool):
+        chosen = "Yes" if value else "No"
     if chosen is None:
         log.warning("fill.radio_no_match", label=field.label[:50], wanted=str(value)[:40])
         return False
 
     await _human_pause()
-    for sel in (f"label:has-text({q(chosen)})",
-                f"input[type=radio][value={q(chosen)}]",
-                f"[role=radio]:has-text({q(chosen)})"):
-        try:
-            loc = page.locator(sel).first
-            if await loc.count():
-                await loc.scroll_into_view_if_needed()
-                await loc.click(timeout=4000)
-                log.debug("fill.radio", label=field.label[:40], chose=chosen)
+    rid = None
+    with contextlib.suppress(Exception):
+        rid = await page.evaluate(_RADIO_PICK_JS, {
+            "selector": field.selector or "",
+            "question": field.label[:160],
+            "choice": chosen,
+        })
+
+    if rid:
+        for sel in (f"label[for={q(rid)}]", f"#{rid}"):
+            try:
+                loc = page.locator(sel).first
+                if await loc.count():
+                    await loc.scroll_into_view_if_needed()
+                    await loc.click(timeout=4000)
+                    if await page.locator(f"#{rid}").first.is_checked():
+                        log.debug("fill.radio", label=field.label[:40], chose=chosen)
+                        return True
+            except Exception:  # noqa: BLE001
+                continue
+        # The label may be styled over a hidden input, which refuses a click.
+        with contextlib.suppress(Exception):
+            await page.locator(f"#{rid}").first.check(timeout=3000, force=True)
+            if await page.locator(f"#{rid}").first.is_checked():
+                log.debug("fill.radio", label=field.label[:40], chose=chosen, via="check")
                 return True
-        except Exception:
-            continue
+
+    log.warning("fill.radio_not_found", label=field.label[:50], chose=str(chosen)[:30])
     return False
+
+
+async def fill_date(page: Any, field: FormField, value: str) -> bool:
+    """Write a date in the format the control actually parses.
+
+    A native <input type=date> wants ISO. A scripted picker does not: given
+    "2026-06-01" Ashby's parsed it as UTC midnight and rendered it in local
+    time, so an availability date of 1 June went in as 31 May. Off by one day
+    on a date the candidate stated is a wrong answer, not a formatting nit.
+    """
+    loc = await _locate(page, field)
+    await loc.scroll_into_view_if_needed()
+    await _human_pause()
+
+    native = ""
+    with contextlib.suppress(Exception):
+        native = (await loc.get_attribute("type") or "").lower()
+
+    iso = value.strip()[:10]
+    if native == "date":
+        await loc.fill(iso)
+        return (await loc.input_value() or "").startswith(iso)
+
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", iso)
+    text = f"{m.group(2)}/{m.group(3)}/{m.group(1)}" if m else value
+    await loc.fill("")
+    await loc.press_sequentially(text, delay=random.randint(30, 70))
+    await asyncio.sleep(0.4)
+    got = (await loc.input_value() or "").strip()
+    ok = bool(m) and m.group(3) in got and m.group(1) in got
+    if not ok:
+        log.warning("fill.date_mismatch", label=field.label[:50], wanted=text, got=got[:20])
+    return ok
 
 
 async def fill_checkbox(page: Any, field: FormField, value: bool) -> bool:
@@ -486,6 +602,9 @@ async def apply_answer(
 
         if field.kind in (FieldKind.CHECKBOX, FieldKind.CONSENT):
             return await fill_checkbox(page, field, bool(v))
+
+        if field.kind is FieldKind.DATE:
+            return await fill_date(page, field, str(v))
 
         sequential = any(h in field.label.lower() for h in AUTOCOMPLETE_HINTS)
         return await fill_text(page, field, str(v), sequential=sequential)
