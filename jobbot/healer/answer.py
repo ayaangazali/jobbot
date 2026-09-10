@@ -179,6 +179,15 @@ def deterministic_answers(
         key = f.profile_key
 
         if key and key.startswith("identity."):
+            # A checkbox is a yes/no, not a place to put a value. HP IQ's
+            # "How did you hear about HP IQ?" group has a box labelled
+            # "LinkedIn", which matched identity.linkedin and was handed the
+            # profile URL -- a string, so it would have ticked the box for a
+            # source the candidate did not come from had the checkbox reader
+            # not refused it.
+            if f.kind in (FieldKind.CHECKBOX, FieldKind.CONSENT):
+                remaining.append(f)
+                continue
             sub = key.split(".", 1)[1]
             # A location autocomplete offers "San Jose, California, United
             # States" beside seven other San Joses; the bare city ties with all
