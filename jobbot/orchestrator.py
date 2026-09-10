@@ -87,6 +87,15 @@ class RunConfig:
     pace_seconds: tuple[float, float] = (25.0, 70.0)
 
 
+# Buttons that hand the application to someone else's account system.
+_THIRD_PARTY_APPLY_JS = """
+() => [...document.querySelectorAll('button, a')]
+    .map(e => (e.innerText || '').trim())
+    .filter(t => /apply with|continue with|sign in with/i.test(t))
+    .slice(0, 3)
+"""
+
+
 class HaltWithTabOpen(RuntimeError):
     """Stop the run without closing the browser, so the form can be inspected."""
 
@@ -490,6 +499,17 @@ class Orchestrator:
             return ApplicationResult(jid, Status.UNREACHABLE.value, "sign-in gate")
 
         if not form.fields:
+            # Distinguish "we could not read the form" from "there is no form".
+            # AbbVie's SmartRecruiters posting offers only "Apply With Indeed":
+            # a third-party account handoff, not a form to fill. Reported as
+            # "no answerable fields found" it read like a parser bug and was
+            # retried on every pass.
+            third_party = await page.evaluate(_THIRD_PARTY_APPLY_JS)
+            if third_party:
+                reason = f"only third-party apply offered: {', '.join(third_party)}"
+                log.warning("apply.third_party_only", job_id=jid, options=third_party)
+                self.tracker.update(jid, status=Status.UNREACHABLE.value, error=reason[:250])
+                return ApplicationResult(jid, Status.UNREACHABLE.value, reason)
             self.tracker.update(jid, status=Status.FAILED.value,
                                 error="no answerable fields found")
             return ApplicationResult(jid, Status.FAILED.value, "no fields")
