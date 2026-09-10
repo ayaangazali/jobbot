@@ -296,6 +296,11 @@ async def _menu_is_open(page: Any) -> bool:
     return False
 
 
+# Above this many visible choices, a control is a search box rather than a
+# fixed list, and what it shows is one page of many -- not the options.
+SEARCHABLE_OPTION_COUNT = 25
+
+
 async def _close_open_menus(page: Any, tries: int = 3) -> None:
     """Dismiss any open listbox so the next field is reachable."""
     for _ in range(tries):
@@ -548,7 +553,7 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
         # "Yes" against a list of three full sentences. With the options on the
         # field, the verifier can suggest one that exists.
         opts = opts or discovered
-        if opts:
+        if opts and len(opts) <= SEARCHABLE_OPTION_COUNT:
             from jobbot.forms.model import FieldOption
             field.options = [FieldOption(label=o) for o in opts[:25]]
         log.warning("fill.combobox_no_option", label=field.label[:50],
@@ -925,6 +930,16 @@ async def discover_options(page: Any, form: Any, *, limit: int = 14) -> int:
             await loc.fill("")            # focus opens the menu
             await asyncio.sleep(0.45)
             opts = await _own_options(page, field)
+            # A long list is a search box, not a menu of choices: the School
+            # picker holds every university on earth and shows the first
+            # hundred alphabetically. Recording those as "the options" made
+            # them authoritative, and "San José State University" -- absent
+            # from Aalborg through Aberystwyth -- became unanswerable, where
+            # typing into it had always worked.
+            if len(opts) > SEARCHABLE_OPTION_COUNT:
+                log.debug("discover.options_searchable", label=field.label[:40],
+                          count=len(opts))
+                opts = []
             if opts:
                 from jobbot.forms.model import FieldOption
                 field.options = [FieldOption(label=o) for o in opts[:40]]
