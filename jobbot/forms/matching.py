@@ -13,6 +13,7 @@ fails closed and is escalated rather than guessed.
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Sequence
 
 from rapidfuzz import fuzz
@@ -24,7 +25,12 @@ _STOP = {"a", "an", "the", "of", "or", "and", "in", "to", "degree", "s"}
 
 
 def normalize(s: str) -> str:
-    s = (s or "").lower().replace("’", "'").replace("‘", "'")
+    # Strip accents: the profile says "San José State University" and the
+    # school picker lists "San Jose State University". Comparing those two as
+    # different strings left a required field empty.
+    s = unicodedata.normalize("NFKD", s or "")
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    s = s.lower().replace("’", "'").replace("‘", "'")
     s = s.replace("'", "")
     s = _PUNCT.sub(" ", s)
     return _WS.sub(" ", s).strip()

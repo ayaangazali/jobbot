@@ -296,8 +296,15 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
             # for the matcher to pick exactly.
             await loc.press_sequentially(text.split(",")[0][:32],
                                          delay=random.randint(35, 75))
-            await asyncio.sleep(0.55)
-        after = await _visible_options(page)
+        # A school or location picker queries a server on each keystroke, and
+        # a fixed wait raced it: the menu was still empty when we looked, so a
+        # required field was left blank with "no options" in the log. Poll.
+        after = []
+        for _ in range(10):
+            await asyncio.sleep(0.3)
+            after = await _visible_options(page)
+            if [o for o in after if o not in before]:
+                break
         opts = [o for o in after if o not in before] or after
         if opts:
             ack = match_acknowledgement(value, opts)
