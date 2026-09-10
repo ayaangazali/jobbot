@@ -109,6 +109,15 @@ def _is_remote(text: str) -> bool:
     return bool(re.search(r"\bremote\b|\bwork from home\b|\banywhere\b", text or "", re.I))
 
 
+def _ashby_apply_url(j: dict[str, Any]) -> str:
+    """The application form, not the job description."""
+    url = (j.get("applyUrl") or j.get("jobUrl") or "").strip()
+    if not url or "/application" in url:
+        return url
+    base, sep, query = url.partition("?")
+    return f"{base.rstrip('/')}/application" + (sep + query if sep else "")
+
+
 def _ashby_salary(comp: dict[str, Any]) -> tuple[int | None, int | None]:
     """Pull a base-salary band out of Ashby's compensation payload.
 
@@ -275,7 +284,11 @@ class Discovery:
             out.append(JobPost(
                 ats=ATS.ASHBY, native_id=str(j.get("id")), company=slug,
                 title=j.get("title", ""),
-                url=j.get("applyUrl") or j.get("jobUrl", ""),   # same as Lever: the form, not the description
+                # Ashby serves the description at /<slug>/<id> and the form at
+                # /<slug>/<id>/application. applyUrl usually carries the
+                # suffix; where the board omits it the parse found no fields at
+                # all and the posting was written off as unfillable.
+                url=_ashby_apply_url(j),
                 location=j.get("location", "") or "",
                 remote=bool(j.get("isRemote")) or _is_remote(j.get("location", "")),
                 description=_strip_html(j.get("descriptionPlain") or j.get("descriptionHtml", "")),

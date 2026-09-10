@@ -400,3 +400,23 @@ def test_work_authorisation_picks_the_variant_the_profile_supports() -> None:
 
     assert answer_for(needs=True) == opts[1]
     assert answer_for(needs=False) == opts[0]
+
+
+def test_an_ashby_posting_points_at_its_application_form() -> None:
+    """Ashby serves the description at /<slug>/<id> and the form one level down.
+
+    Where the board's applyUrl omitted the suffix, the parse found no fields at
+    all and Exa and Deepgram were written off as unfillable -- while AfterQuery,
+    Binance and Circleback, whose URLs carried it, went through.
+    """
+    from jobbot.discovery.sources import _ashby_apply_url
+
+    assert _ashby_apply_url({"applyUrl": "https://jobs.ashbyhq.com/exa/abc"}) == \
+        "https://jobs.ashbyhq.com/exa/abc/application"
+    # Already correct, and the query string survives.
+    assert _ashby_apply_url(
+        {"applyUrl": "https://jobs.ashbyhq.com/cb/abc/application?embed=true"}) == \
+        "https://jobs.ashbyhq.com/cb/abc/application?embed=true"
+    assert _ashby_apply_url({"jobUrl": "https://jobs.ashbyhq.com/dg/abc?embed=true"}) == \
+        "https://jobs.ashbyhq.com/dg/abc/application?embed=true"
+    assert _ashby_apply_url({}) == ""
