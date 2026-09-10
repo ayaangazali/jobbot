@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
+import shutil
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -249,6 +251,27 @@ async def _enter_embedded_form(page: Any) -> str | None:
     return src
 
 
+def _keep_a_copy(pdf: Path, post: JobPost) -> None:
+    """Drop a named copy where the candidate can find it.
+
+    The audit copy is called resume.pdf inside a directory named after a job
+    id, which is unreadable when you want to look at what was sent. Set
+    JOBBOT_RESUME_DIR to get "Nuro - Software Engineer AI Platform - Intern.pdf"
+    somewhere useful instead.
+    """
+    dest_dir = os.environ.get("JOBBOT_RESUME_DIR")
+    if not dest_dir:
+        return
+    safe = re.sub(r"[^\w .,&()-]", "", f"{post.company} - {post.title}")[:120].strip()
+    try:
+        d = Path(dest_dir).expanduser()
+        d.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(pdf, d / f"{safe}.pdf")
+    except OSError as exc:
+        # A copy for the candidate's convenience must never fail an application.
+        log.warning("resume.copy_failed", error=str(exc)[:120])
+
+
 class Orchestrator:
     def __init__(self, profile: Profile, session: BrowserSession, llm: LLMClient,
                  tracker: Tracker, config: RunConfig | None = None) -> None:
@@ -425,6 +448,7 @@ class Orchestrator:
 
         resume_pdf = audit / "resume.pdf"
         await render_one_page(page, tailored, resume_pdf)
+        _keep_a_copy(resume_pdf, post)
         (audit / "resume_content.json").write_text(json.dumps(tailored, indent=2))
         self.tracker.update(jid, status=Status.PREPARED.value,
                             resume_path=str(resume_pdf), github_project_url=project_url,
