@@ -41,7 +41,8 @@ from jobbot.llm.client import LLMClient, cached_system
 from jobbot.llm.schemas import (
     KNOCKOUT_TOOL, PARSE_FORM_TOOL, POST_SUBMIT_TOOL, VERIFY_FORM_TOOL,
 )
-from jobbot.profile import Profile
+from jobbot.profile import LEGALLY_SIGNIFICANT, Profile
+
 
 log = structlog.get_logger(__name__)
 
@@ -393,9 +394,18 @@ async def heal(
             f = by_id.get(issue.field_id)
             if f is None:
                 continue
-            if f.legally_significant:
+            if f.profile_key in LEGALLY_SIGNIFICANT:
                 # Never let the healer rewrite a legally significant answer.
-                log.warning("heal.refused_legal", label=f.label[:60])
+                #
+                # Keyed on the profile's own denylist, not on the vision pass's
+                # legally_significant flag: vision marked "End date month" and
+                # "End date year" on an education block as legally significant,
+                # the healer refused both, and the application could not reach
+                # ready_to_submit however many rounds it ran. What must never be
+                # model-authored is the fixed set of status questions, and those
+                # all carry a profile_key.
+                log.warning("heal.refused_legal", label=f.label[:60],
+                            key=f.profile_key)
                 continue
             if issue.suggested_value in (None, ""):
                 continue
