@@ -226,6 +226,29 @@ def fit_score(profile: Profile, post: JobPost) -> float:
     return round(score, 3)
 
 
+async def _enter_embedded_form(page: Any) -> str | None:
+    """Follow a Greenhouse form embedded in a company careers page into its own tab.
+
+    Company sites (nuro.ai/careersitem?gh_jid=...) host the application in an
+    iframe from job-boards.greenhouse.io/embed/job_app. Nothing here walks
+    frames: the DOM extract saw one control on the outer page and vision then
+    reported seventeen fields with no selector, none of which get_by_label could
+    reach across the frame boundary -- 1 of 17 filled. The embed URL renders the
+    same form standalone, so navigating into it fixes extract, capture, fill and
+    verify at once instead of teaching each of them about frames.
+    """
+    frame = page.locator("iframe[src*='greenhouse.io/embed/job_app']").first
+    if not await frame.count():
+        return None
+    src = await frame.get_attribute("src")
+    if not src:
+        return None
+    log.info("apply.embedded_form", src=src.split("?")[0])
+    await page.goto(src, wait_until="domcontentloaded")
+    await cap.settle(page, quiet_ms=900)
+    return src
+
+
 class Orchestrator:
     def __init__(self, profile: Profile, session: BrowserSession, llm: LLMClient,
                  tracker: Tracker, config: RunConfig | None = None) -> None:
@@ -303,6 +326,7 @@ class Orchestrator:
         jid = post.job_id
         await page.goto(post.url, wait_until="domcontentloaded")
         await cap.settle(page, quiet_ms=900)
+        form_url = await _enter_embedded_form(page) or post.url
 
         det = detect(page.url, None)
         log.info("apply.start", job_id=jid, ats=det.ats.value, company=post.company)
@@ -407,7 +431,7 @@ class Orchestrator:
                             match_score=fit_score(self.profile, post))
 
         # Re-navigate: rendering the PDF took this tab to a file:// URL.
-        await page.goto(post.url, wait_until="domcontentloaded")
+        await page.goto(form_url, wait_until="domcontentloaded")
         await cap.settle(page, quiet_ms=800)
         if det.ats in REQUIRES_ACCOUNT and det.ats is ATS.WORKDAY:
             await wd.start_application(page)
