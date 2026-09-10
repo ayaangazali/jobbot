@@ -249,6 +249,25 @@ async def field_validity(page: Any, form: ParsedForm) -> dict[str, dict[str, Any
     return {f.field_id: by_sel[f.selector]
             for f in form.fields if f.selector in by_sel}
 
+def _confirmed_screening(profile) -> str:
+    """The screening answers the candidate confirmed, for the verifier only.
+
+    profile_digest deliberately omits these so no model composing an answer can
+    read them. The verifier is the opposite case: without them it saw a "Yes"
+    on work authorization, found nothing in the profile to check it against,
+    and raised a blocker on an answer the candidate had personally confirmed --
+    every run, unfixably, because the healer refuses to touch a legal field.
+    """
+    lines = [f"- {k}: {profile.answer(k).value}"
+             for k in sorted(profile.screening)
+             if profile.can_answer(k)]
+    if not lines:
+        return ""
+    return ("\n\nSCREENING ANSWERS THE CANDIDATE CONFIRMED (authoritative -- an "
+            "entered value matching one of these is correct, not a contradiction):\n"
+            + "\n".join(lines))
+
+
 async def checkpoint_verify(
     page: Any, llm: LLMClient, profile: Profile, form: ParsedForm,
     answers: list[ProposedAnswer], shots_dir: str | Path, round_no: int = 0,
@@ -270,7 +289,8 @@ async def checkpoint_verify(
         system=cached_system(
             "You are the last check before a job application is submitted in the "
             "candidate's name. Be strict and literal.\n\nCANDIDATE PROFILE:\n"
-            + profile_digest(profile)),
+            + profile_digest(profile)
+            + _confirmed_screening(profile)),
         prompt=(
             "The screenshots show the application form AFTER it was filled in.\n\n"
             "Values we intended to enter:\n" + json.dumps(intended, indent=1)[:9000]

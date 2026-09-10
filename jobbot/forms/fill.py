@@ -133,14 +133,17 @@ async def fill_text(page: Any, field: FormField, value: str, *, sequential: bool
                     max_length=field.max_length)
 
     if not ok and field.kind is FieldKind.PHONE:
-        # Many phone widgets reformat or reject punctuation. Retry with bare
-        # digits before declaring failure.
+        # A phone widget reformats what it is given: "6693609914" comes back as
+        # "(669) 360-9914", which is the same number and not a failure. Compare
+        # digits before retrying -- the retry types key by key, and racing
+        # intl-tel-input's reformatting cost a digit: "(669) 609-914".
         digits = re.sub(r"\D", "", str(value))
-        if digits:
+        ok = bool(digits) and re.sub(r"\D", "", got).endswith(digits[-10:])
+        if not ok and digits:
             await loc.fill("")
-            await loc.press_sequentially(digits, delay=random.randint(25, 55))
+            await loc.fill(digits)
             got = await loc.input_value()
-            ok = bool(re.sub(r"\D", "", got)) and re.sub(r"\D", "", got).endswith(digits[-10:])
+            ok = re.sub(r"\D", "", got).endswith(digits[-10:])
 
     if not ok:
         log.warning("fill.text_mismatch", label=field.label[:50],

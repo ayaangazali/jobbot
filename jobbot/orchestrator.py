@@ -504,6 +504,11 @@ class Orchestrator:
             answers.append(ProposedAnswer(
                 f.field_id, str(resume_pdf), AnswerSource.PROFILE, 1.0,
                 "tailored resume for this role"))
+            # One resume, one slot. Vision reports the same upload twice (as
+            # "Attach" and as "Resume/CV"), the duplicate carries no selector,
+            # and upload_file's input[type=file] fallback then guessed -- it
+            # picked the cover-letter input and the verifier blocked on it.
+            break
 
         by_id = {f.field_id: f for f in form.fields}
         filled = 0
