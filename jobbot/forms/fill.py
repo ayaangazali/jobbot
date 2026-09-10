@@ -372,9 +372,11 @@ _RADIO_PICK_JS = r"""
 ({selector, question, choice}) => {
   const norm = s => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const want = norm(choice);
-  const radios = [...document.querySelectorAll('input[type=radio]')];
-  if (!radios.length) return null;
-
+  const tag = el => {
+    const k = 'jp' + Math.random().toString(36).slice(2, 9);
+    el.setAttribute('data-jobbot-pick', k);
+    return '[data-jobbot-pick="' + k + '"]';
+  };
   const labelOf = r => {
     if (r.id) {
       const l = document.querySelector('label[for="' + (window.CSS ? CSS.escape(r.id) : r.id) + '"]');
@@ -384,6 +386,8 @@ _RADIO_PICK_JS = r"""
     return p ? p.innerText : (r.value || '');
   };
 
+  // 1. A real radio group, identified by the name the DOM walk grouped on.
+  const radios = [...document.querySelectorAll('input[type=radio]')];
   let name = null;
   if (selector) {
     try {
@@ -391,12 +395,14 @@ _RADIO_PICK_JS = r"""
       if (e && e.type === 'radio') name = e.name;
     } catch (err) { /* a vision-invented selector need not parse */ }
   }
-
   let group = name ? radios.filter(r => r.name === name) : [];
 
-  if (!group.length && question) {
-    const qn = norm(question);
-    const words = qn.split(' ').filter(w => w.length > 3);
+  const qn = norm(question);
+  const words = qn.split(' ').filter(w => w.length > 3);
+  const scoreText = txt => txt.includes(qn.slice(0, 40))
+      ? 1000 : words.filter(w => txt.includes(w)).length;
+
+  if (!group.length && radios.length && qn) {
     let best = null, bestScore = 0;
     for (const n of [...new Set(radios.map(r => r.name))]) {
       const g = radios.filter(r => r.name === n);
@@ -405,21 +411,41 @@ _RADIO_PICK_JS = r"""
         holder = holder.parentElement;
         if (norm(holder.innerText).length > qn.length / 2) break;
       }
-      const txt = norm(holder ? holder.innerText : '');
-      const score = txt.includes(qn.slice(0, 40))
-        ? 1000 : words.filter(w => txt.includes(w)).length;
-      if (score > bestScore) { bestScore = score; best = g; }
+      const sc = scoreText(norm(holder ? holder.innerText : ''));
+      if (sc > bestScore) { bestScore = sc; best = g; }
     }
     if (bestScore > 0) group = best;
   }
-  if (!group.length) return null;
+  if (group.length) {
+    const hit = group.find(r => norm(labelOf(r)) === want)
+             || group.find(r => norm(labelOf(r)).startsWith(want))
+             || group.find(r => norm(r.value) === want);
+    if (hit) {
+      const lab = hit.id
+        ? document.querySelector('label[for="' + (window.CSS ? CSS.escape(hit.id) : hit.id) + '"]')
+        : hit.closest('label');
+      return {click: tag(lab || hit), verify: tag(hit), kind: 'radio'};
+    }
+  }
 
-  const hit = group.find(r => norm(labelOf(r)) === want)
-           || group.find(r => norm(labelOf(r)).startsWith(want))
-           || group.find(r => norm(r.value) === want);
-  if (!hit) return null;
-  if (!hit.id) hit.id = 'jobbot-radio-' + Math.random().toString(36).slice(2);
-  return hit.id;
+  // 2. No radio anywhere: Ashby renders a Yes/No question as one hidden
+  //    checkbox with the choices as ordinary clickable elements beside it.
+  //    Find the block that asks THIS question, then the choice inside it.
+  if (!qn) return null;
+  const blocks = [...document.querySelectorAll('div, fieldset, section, li')]
+    .filter(el => {
+      const t = norm(el.innerText);
+      return t.includes(qn.slice(0, 40)) && t.length < qn.length + 400;
+    });
+  if (!blocks.length) return null;
+  const block = blocks[blocks.length - 1];   // innermost match
+
+  const choices = [...block.querySelectorAll('label, button, span, div, [role=radio], [role=option]')]
+    .filter(el => el.children.length === 0 && norm(el.innerText) === want);
+  if (!choices.length) return null;
+
+  const backing = block.querySelector('input[type=checkbox], input[type=radio]');
+  return {click: tag(choices[0]), verify: backing ? tag(backing) : null, kind: 'custom'};
 }
 """
 
@@ -441,32 +467,40 @@ async def fill_radio(page: Any, field: FormField, value: Any) -> bool:
         return False
 
     await _human_pause()
-    rid = None
+    pick = None
     with contextlib.suppress(Exception):
-        rid = await page.evaluate(_RADIO_PICK_JS, {
+        pick = await page.evaluate(_RADIO_PICK_JS, {
             "selector": field.selector or "",
             "question": field.label[:160],
             "choice": chosen,
         })
 
-    if rid:
-        for sel in (f"label[for={q(rid)}]", f"#{rid}"):
-            try:
-                loc = page.locator(sel).first
-                if await loc.count():
-                    await loc.scroll_into_view_if_needed()
-                    await loc.click(timeout=4000)
-                    if await page.locator(f"#{rid}").first.is_checked():
-                        log.debug("fill.radio", label=field.label[:40], chose=chosen)
+    if pick and pick.get("click"):
+        verify = pick.get("verify")
+        try:
+            loc = page.locator(pick["click"]).first
+            await loc.scroll_into_view_if_needed()
+            await loc.click(timeout=4000)
+            await asyncio.sleep(0.25)
+            if verify:
+                with contextlib.suppress(Exception):
+                    if await page.locator(verify).first.is_checked():
+                        log.debug("fill.radio", label=field.label[:40],
+                                  chose=chosen, kind=pick.get("kind"))
                         return True
-            except Exception:  # noqa: BLE001
-                continue
-        # The label may be styled over a hidden input, which refuses a click.
-        with contextlib.suppress(Exception):
-            await page.locator(f"#{rid}").first.check(timeout=3000, force=True)
-            if await page.locator(f"#{rid}").first.is_checked():
-                log.debug("fill.radio", label=field.label[:40], chose=chosen, via="check")
+            else:
+                log.debug("fill.radio", label=field.label[:40], chose=chosen,
+                          kind=pick.get("kind"), verified=False)
                 return True
+        except Exception:  # noqa: BLE001
+            pass
+        # A styled label over a hidden input refuses an ordinary click.
+        if verify:
+            with contextlib.suppress(Exception):
+                await page.locator(verify).first.check(timeout=3000, force=True)
+                if await page.locator(verify).first.is_checked():
+                    log.debug("fill.radio", label=field.label[:40], chose=chosen, via="check")
+                    return True
 
     log.warning("fill.radio_not_found", label=field.label[:50], chose=str(chosen)[:30])
     return False
