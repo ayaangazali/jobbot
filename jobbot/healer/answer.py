@@ -263,6 +263,31 @@ def deterministic_answers(
                 continue
 
             v = ans.value
+            # A work-authorisation question often offers qualified variants:
+            # "Yes, and I will not need sponsorship" beside "Yes, but I will
+            # need sponsorship in the future". Answering the bare "Yes" picks
+            # whichever the matcher reaches first and then reads as a mismatch
+            # at verification. The candidate's own sponsorship answers say
+            # which variant is true, so use them.
+            if key == "work_authorization" and v is True:
+                opts_now = real_options(f)
+                qualified = [o for o in opts_now if re.match(r"\s*yes\b", o, re.I)
+                             and re.search(r"sponsor", o, re.I)]
+                if len(opts_now) > 2 and qualified:
+                    needs = (profile.answer("requires_sponsorship_future").value
+                             or profile.answer("requires_sponsorship_now").value)
+                    wants_need = bool(needs)
+                    pick = [o for o in qualified
+                            if bool(re.search(r"\b(not|no|won'?t|do not)\b.{0,20}"
+                                              r"(need|require)|(need|require)\w*\s+no\b",
+                                              o, re.I)) is not wants_need]
+                    if len(pick) == 1:
+                        answers.append(ProposedAnswer(
+                            f.field_id, pick[0], AnswerSource.PROFILE, 1.0,
+                            "confirmed work_authorization, qualified by the "
+                            "candidate's confirmed sponsorship answer"))
+                        continue
+
             if key == "ethnicity" and re.search(r"hispanic|latino", f.label, re.I) \
                     and isinstance(v, str) and v.lower() not in ("yes", "no"):
                 # The question is yes/no; the profile stores the ethnicity.

@@ -368,3 +368,35 @@ def test_yes_maps_onto_a_sentence_without_asserting_a_fact() -> None:
     # Two factual affirmatives: declining beats putting words in their mouth.
     assert match_yes_no_prose(
         "Yes", ["I have a degree", "I have a licence", "I have neither"]) is None
+
+
+def test_work_authorisation_picks_the_variant_the_profile_supports() -> None:
+    """Forms qualify "Yes" with whether sponsorship will be needed.
+
+    Answering the bare "Yes" let the matcher pick whichever variant it reached
+    first, which then read as a mismatch at verification. The candidate's own
+    confirmed sponsorship answers decide which is true, and both must come from
+    the profile -- neither is a guess.
+    """
+    from jobbot.healer.answer import deterministic_answers
+    from jobbot.forms.model import FieldKind, FieldOption, FormField, ParsedForm
+    from jobbot.profile import Profile
+
+    opts = ["Yes, and I will not need visa sponsorship",
+            "Yes, but I will need visa sponsorship in the future", "No"]
+
+    def answer_for(*, needs: bool) -> str:
+        p = Profile.model_validate({
+            "identity": {"first_name": "A", "last_name": "B", "email": "a@b.com"},
+            "screening": {"work_authorization": True,
+                          "requires_sponsorship_future": needs,
+                          "requires_sponsorship_now": needs},
+        })
+        f = FormField(field_id="q", label="Are you authorized to work in the United States?",
+                      kind=FieldKind.RADIO,
+                      options=[FieldOption(label=o) for o in opts], required=True)
+        got, _ = deterministic_answers(p, ParsedForm(fields=[f]))
+        return str(got[0].value)
+
+    assert answer_for(needs=True) == opts[1]
+    assert answer_for(needs=False) == opts[0]
