@@ -96,6 +96,18 @@ _THIRD_PARTY_APPLY_JS = """
 """
 
 
+# The page telling us why it refused, rather than telling us nothing.
+_REJECTED_AT_SUBMIT = re.compile(
+    r"needs? correction|missing entry|required field|please complete"
+    r"|please correct|please check this box|fix the following|is required",
+    re.I)
+
+
+def _looks_rejected(evidence: str, errors: list[str]) -> bool:
+    blob = " ".join([evidence or "", *(errors or [])])
+    return bool(_REJECTED_AT_SUBMIT.search(blob))
+
+
 class HaltWithTabOpen(RuntimeError):
     """Stop the run without closing the browser, so the form can be inspected."""
 
@@ -762,6 +774,17 @@ class Orchestrator:
 
         if outcome.submitted:
             self.tracker.mark_submitted(jid, outcome.evidence)
+        elif _looks_rejected(outcome.evidence, outcome.errors):
+            # Not ambiguous: the page said why it refused. Dedalus Labs
+            # answered a submit with "Your form needs corrections -- Missing
+            # entry for required field", and recording that as SUBMITTED made
+            # already_applied skip the job forever over an application that
+            # was never sent.
+            detail = (outcome.evidence or "; ".join(outcome.errors))[:250]
+            log.warning("apply.rejected_at_submit", job_id=jid, detail=detail[:120])
+            self.tracker.update(jid, status=Status.NEEDS_HUMAN.value,
+                                error=detail,
+                                notes="submit refused by the form; not sent")
         else:
             # A click is not confirmation. Without positive evidence we record
             # SUBMITTED (not CONFIRMED) if we clicked, so a human can check --

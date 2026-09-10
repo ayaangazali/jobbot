@@ -471,3 +471,22 @@ def test_no_does_not_tick_a_checkbox() -> None:
     # Anything we cannot read is left alone rather than guessed either way.
     assert _as_bool("maybe") is None
     assert _as_bool("it depends") is None
+
+
+def test_a_refused_submit_is_not_recorded_as_submitted() -> None:
+    """Dedalus Labs answered a submit with why it refused, and we filed it as sent.
+
+    "Your form needs corrections -- Missing entry for required field" is
+    positive evidence the application did NOT go through. Recorded as
+    SUBMITTED, already_applied then skips the job permanently, so a form that
+    was never sent can never be retried. A blank response is a different case:
+    that one stays ambiguous on purpose.
+    """
+    from jobbot.orchestrator import _looks_rejected
+
+    assert _looks_rejected(
+        "Your form needs corrections - Missing entry for required field: languages", [])
+    assert _looks_rejected("", ["Please complete all required fields"])
+    assert not _looks_rejected(
+        "Thank you for applying! Your application has been received.", [])
+    assert not _looks_rejected("", []), "no evidence stays ambiguous, not rejected"
