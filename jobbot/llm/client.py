@@ -59,6 +59,13 @@ MERIDIAN_URL = os.environ.get("MERIDIAN_URL", "http://127.0.0.1:3456")
 # Requests above this budget are streamed; long non-streaming calls time out.
 STREAM_THRESHOLD_TOKENS = 6000
 
+# Per-read timeout on the API socket. This was 600s: a stalled connection on a
+# 2,500-token knockout scan sat in SSLSocket.read for ten minutes before the
+# retry logic got a look at it -- with the browser tab open and the event loop
+# blocked the whole time. Streaming resets the clock on every chunk, so long
+# generations are unaffected; this only bounds silence.
+LLM_TIMEOUT_S = 120.0
+
 HIRES_LONG_EDGE = 2576
 STANDARD_LONG_EDGE = 1568
 
@@ -198,9 +205,9 @@ class LLMClient:
             self.client = Anthropic(
                 base_url=MERIDIAN_URL,
                 api_key=os.environ.get("ANTHROPIC_API_KEY", "meridian-placeholder"),
-                timeout=600.0,   # NOTE: a float, not httpx.Timeout -- the SDK
-                                 # uses httpx2 and mishandles an httpx.Timeout,
-                                 # which surfaces as an instant 'Connection error'.
+                timeout=LLM_TIMEOUT_S,   # NOTE: a float, not httpx.Timeout -- the SDK
+                                         # uses httpx2 and mishandles an httpx.Timeout,
+                                         # which surfaces as an instant 'Connection error'.
                 max_retries=0,   # tenacity owns retries
             )
         elif self.provider == "anthropic":
@@ -209,7 +216,7 @@ class LLMClient:
                 raise LLMError("JOBBOT_LLM_PROVIDER=anthropic requires ANTHROPIC_API_KEY")
             self.client = Anthropic(
                 api_key=key,
-                timeout=600.0,
+                timeout=LLM_TIMEOUT_S,
                 max_retries=0,
             )
         else:

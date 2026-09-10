@@ -346,7 +346,10 @@ class Orchestrator:
             return ApplicationResult(jid, Status.FAILED.value, "no fields")
 
         # --- knockout pre-scan, BEFORE any expensive work ----------------
-        knockouts, skip = ck.knockout_scan(self.llm, self.profile, form, post.title)
+        # Off the event loop like every other model call: while this blocked,
+        # nothing else could run -- including Playwright's own connection.
+        knockouts, skip = await asyncio.to_thread(
+            ck.knockout_scan, self.llm, self.profile, form, post.title)
         if skip and knockouts:
             reason = "; ".join(f"{k['label'][:40]}={k['honest_answer'][:20]}" for k in knockouts[:3])
             self.tracker.update(jid, status=Status.KNOCKOUT_FAIL.value,
