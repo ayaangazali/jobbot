@@ -176,7 +176,10 @@ class Discovery:
             loc = cats.get("location", "") or ""
             out.append(JobPost(
                 ats=ATS.LEVER, native_id=str(j.get("id")), company=slug,
-                title=j.get("text", ""), url=j.get("hostedUrl", ""),
+                # applyUrl is the form; hostedUrl is the description page with an
+                # "Apply" button. Navigating to the description found no inputs
+                # and the application was marked failed with "no fields".
+                title=j.get("text", ""), url=j.get("applyUrl") or j.get("hostedUrl", ""),
                 location=loc,
                 remote=_is_remote(f"{loc} {cats.get('commitment','')} {j.get('workplaceType','')}"),
                 description=_strip_html(j.get("descriptionPlain") or j.get("description", "")),
@@ -198,7 +201,8 @@ class Discovery:
             lo, hi = _ashby_salary(j.get("compensation") or {})
             out.append(JobPost(
                 ats=ATS.ASHBY, native_id=str(j.get("id")), company=slug,
-                title=j.get("title", ""), url=j.get("jobUrl", ""),
+                title=j.get("title", ""),
+                url=j.get("applyUrl") or j.get("jobUrl", ""),   # same as Lever: the form, not the description
                 location=j.get("location", "") or "",
                 remote=bool(j.get("isRemote")) or _is_remote(j.get("location", "")),
                 description=_strip_html(j.get("descriptionPlain") or j.get("descriptionHtml", "")),
