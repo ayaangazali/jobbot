@@ -816,9 +816,19 @@ async def upload_file(page: Any, field: FormField, path: str | Path) -> bool:
     if not p.exists():
         raise FillError(f"file to upload does not exist: {p}")
 
-    # An empty selector is not a candidate: `page.locator("")` raises a CSS
-    # parse error that reads like a real failure in the logs.
-    for sel in (field.selector, "input[type=file]"):
+    # With no selector of its own, find the upload inside the block that asks
+    # for this document. The old fallback took the first input[type=file] on
+    # the page, which on a form with Resume/CV, Cover Letter and Academic
+    # Transcript slots is a coin toss -- and attaching a resume to a transcript
+    # field sends an employer the wrong document under the candidate's name.
+    scoped = None
+    if not field.selector and field.label:
+        with contextlib.suppress(Exception):
+            scoped = await page.evaluate(_BLOCK_CONTROL_JS, {"question": field.label[:160]})
+        if scoped:
+            log.debug("fill.upload_scoped_by_block", label=field.label[:40])
+
+    for sel in (field.selector, scoped):
         if not sel:
             continue
         try:
@@ -832,17 +842,56 @@ async def upload_file(page: Any, field: FormField, path: str | Path) -> bool:
             log.debug("fill.upload_attempt_failed", sel=sel, error=str(exc)[:100])
             continue
 
-    # Dropzone with no reachable input: drive the file chooser instead.
+    # Dropzone with no reachable input: drive the file chooser, but only from
+    # the button that belongs to THIS document's block. Clicking the first
+    # "Attach" on the page picks between Resume/CV, Cover Letter and Academic
+    # Transcript at random, and a resume filed as a transcript is worse than a
+    # missing attachment -- the verifier catches the second and cannot know the
+    # first was wrong.
+    btn = None
+    if field.label:
+        with contextlib.suppress(Exception):
+            btn = await page.evaluate(_BLOCK_BUTTON_JS, {"question": field.label[:160]})
+    if not btn:
+        log.warning("fill.upload_no_scoped_target", label=field.label[:50])
+        return False
     try:
         async with page.expect_file_chooser(timeout=6000) as info:
-            await page.locator("button:has-text('Attach'), button:has-text('Upload')").first.click()
+            await page.locator(btn).first.click()
         chooser = await info.value
         await chooser.set_files(str(p))
         await asyncio.sleep(0.9)
+        log.info("fill.uploaded", label=field.label[:40], file=p.name, via="chooser")
         return True
     except Exception as exc:  # noqa: BLE001
         log.warning("fill.upload_failed", error=str(exc)[:150])
         return False
+
+
+# The upload button inside the block that asks for a particular document.
+_BLOCK_BUTTON_JS = r"""
+({question}) => {
+  const norm = s => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const q = norm(question);
+  if (q.length < 4) return null;
+  const needle = q.slice(0, 40);
+  const blocks = [...document.querySelectorAll('div, fieldset, section, li, label')]
+    .filter(el => norm(el.innerText).includes(needle)
+                  && norm(el.innerText).length < q.length + 400);
+  for (const block of blocks.reverse()) {
+    for (const b of block.querySelectorAll('button, [role="button"], label')) {
+      if (!/attach|upload|choose|browse|select file/i.test(b.innerText || '')) continue;
+      const r = b.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        const k = 'ju' + Math.random().toString(36).slice(2, 9);
+        b.setAttribute('data-jobbot-pick', k);
+        return '[data-jobbot-pick="' + k + '"]';
+      }
+    }
+  }
+  return null;
+}
+"""
 
 
 AUTOCOMPLETE_HINTS = ("location", "city", "address", "school", "university",
