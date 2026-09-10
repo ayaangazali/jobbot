@@ -197,6 +197,10 @@ def cmd_run(args) -> int:
         make_github_project=not args.no_project,
         publish_project_private=args.private_projects,
         min_match_score=args.min_match,
+        # An explicit tick per job outranks the anti-spam cap: the candidate
+        # approved nine roles at one company one at a time, and silently
+        # dropping six of them would be the software overriding the person.
+        per_company_cap=10_000 if args.approved else RunConfig.per_company_cap,
     )
 
     async def go():
