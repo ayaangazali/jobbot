@@ -95,6 +95,7 @@ def _merge(dom: ParsedForm, seen: dict[str, Any]) -> ParsedForm:
         return re.sub(r"[^a-z0-9 ]", " ", (text or "").lower()).strip()[:60]
 
     by_label = {_key(f.label): f for f in dom.fields}
+    claimed: set[int] = set()
 
     for vf in seen.get("fields", []):
         key = _key(vf.get("label") or "")
@@ -110,7 +111,24 @@ def _merge(dom: ParsedForm, seen: dict[str, Any]) -> ParsedForm:
                 if (lab in key or key in lab) and min(len(lab), len(key)) > 12:
                     match = f
                     break
+
+        if match is None and key:
+            # Labels can disagree completely: the DOM reads a date picker's
+            # placeholder, "Pick date...", while vision reads the question
+            # above it, "Available Start Date*". If exactly one unclaimed DOM
+            # field has the same distinctive kind, it is that field -- and
+            # keeping them apart left the answer on the vision copy, which has
+            # no selector and so can never be filled.
+            if (vf.get("kind") or "") in {"date", "file", "textarea", "phone", "email"}:
+                same = [f for f in dom.fields
+                        if f.kind.value == vf["kind"] and id(f) not in claimed]
+                if len(same) == 1:
+                    match = same[0]
+                    # The question reads better than a placeholder.
+                    if len(vf.get("label") or "") > len(match.label):
+                        match.label = vf["label"][:200]
         if match is not None:
+            claimed.add(id(match))
             match.required = match.required or bool(vf.get("required"))
             match.legally_significant = (match.legally_significant
                                          or bool(vf.get("legally_significant")))

@@ -96,6 +96,9 @@ _SCREENING_MAP: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"related to|family member.*employe", re.I), "related_to_employee"),
     (re.compile(r"professional licen[sc]e", re.I), "professional_license"),
     (re.compile(r"(highest )?(level of )?education|degree", re.I), "education_degree"),
+    (re.compile(r"(available|earliest|preferred|desired).{0,12}(start|availab)"
+                r"|start date|when can you (start|begin)|date available", re.I),
+     "start_date"),
 ]
 
 _GPA = re.compile(r"\bgpa\b|grade point average", re.I)
@@ -203,6 +206,18 @@ def deterministic_answers(
                     answers.append(ProposedAnswer(f.field_id, s, AnswerSource.PROFILE,
                                                   0.9, "bolstering range"))
                     continue
+
+        elif key == "start_date":
+            # A date picker needs a date. "this month" is how the candidate
+            # wrote his availability, and the model refused to convert it
+            # rather than invent one -- right in principle, but it left a
+            # required field empty on every form that asks.
+            when = profile.earliest_start_date()
+            if when is not None:
+                answers.append(ProposedAnswer(
+                    f.field_id, when.isoformat(), AnswerSource.DERIVED, 0.9,
+                    f"earliest_start {profile.earliest_start!r} resolved against today"))
+                continue
 
         elif key == "gpa":
             gpa = next((e.gpa for e in profile.education if e.gpa is not None), None)

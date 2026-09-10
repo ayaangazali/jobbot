@@ -27,7 +27,9 @@ system answering a legally significant question it was never told the answer to.
 from __future__ import annotations
 
 import enum
-from datetime import date
+import contextlib
+import re
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -306,6 +308,39 @@ class Profile(BaseModel):
 
     def can_answer(self, key: str) -> bool:
         return self.answer(key).usable_for(key)
+
+    def earliest_start_date(self, today: date | None = None) -> date | None:
+        """The stated availability as a calendar date, or None if it is not one.
+
+        `earliest_start` is free text because that is how people say it: "this
+        month", "2 weeks from offer", "June 2027". A date picker needs a date,
+        and the model refused to supply one rather than invent it -- correctly,
+        but that left a required field empty. Resolving the phrase against
+        today's calendar is arithmetic, not invention; anything that is not a
+        recognised phrasing still returns None and goes to the candidate.
+        """
+        text = (self.earliest_start or "").strip().lower()
+        if not text:
+            return None
+        today = today or date.today()
+
+        m = re.search(r"(\d{4})-(\d{2})-(\d{2})", text)
+        if m:
+            with contextlib.suppress(ValueError):
+                return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+        if re.search(r"immediate|right away|\basap\b|\bnow\b|this month|any time|anytime", text):
+            return today
+
+        m = re.search(r"(\d+)\s*(day|week|month)", text)
+        if m:
+            n, unit = int(m.group(1)), m.group(2)
+            days = {"day": 1, "week": 7, "month": 30}[unit] * n
+            return today + timedelta(days=days)
+
+        if "next month" in text:
+            return today + timedelta(days=30)
+        return None
 
     def missing_identity(self) -> list[str]:
         """Identity fields an application cannot be submitted without.
