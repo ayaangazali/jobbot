@@ -71,6 +71,13 @@ _SCREENING_MAP: list[tuple[re.Pattern[str], str]] = [
                 r"|sponsor.{0,40}\bfuture\b", re.I), "requires_sponsorship_future"),
     (re.compile(r"\bsponsor(ship)?\b", re.I), "requires_sponsorship_now"),
     (re.compile(r"legally.*(authoriz|entitled).*work|work authoriz|authorized to work", re.I), "work_authorization"),
+    # Before citizenship, deliberately. Apex asks "You must be a U.S. Person
+    # because this position requires access to information subject to U.S.
+    # export controls. Are you a US Person? (Citizen, Green Card holder,
+    # etc.)" -- the word "Citizen" appears only as an example, and reading it
+    # as a nationality question answered a yes/no field with "Indian".
+    (re.compile(r"export control|\bitar\b|\bear\b\s+regulat|protected individual"
+                r"|u\.?s\.? person\b", re.I), "export_control_us_person"),
     (re.compile(r"\bcitizen(ship)?\b", re.I), "citizenship"),
     (re.compile(r"\bvisa status\b", re.I), "visa_status"),
     (re.compile(r"convicted|criminal|felony", re.I), "criminal_history"),
@@ -83,11 +90,6 @@ _SCREENING_MAP: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bhispanic\b|\blatino\b", re.I), "ethnicity"),
     (re.compile(r"(at least|over|are you).{0,12}18", re.I), "age_over_18"),
     (re.compile(r"security clearance|clearance", re.I), "government_clearance"),
-    # Defence and aerospace employers all ask this, in ITAR's own words. Left
-    # unmapped it reached the model, which correctly refused it, and the
-    # application then halted on an unanswerable required field.
-    (re.compile(r"export control|\bitar\b|\bear\b\s+regulat|protected individual"
-                r"|u\.?s\.? person\b", re.I), "export_control_us_person"),
     (re.compile(r"non-?compete", re.I), "non_compete"),
     (re.compile(r"(previously|ever).{0,30}(work|employ).{0,20}(here|for us|at)", re.I), "previously_employed_here"),
     (re.compile(r"(ever\s+)?interviewed?\b.{0,30}(here|before|with us|at)", re.I), "previously_interviewed_here"),
@@ -272,6 +274,26 @@ def deterministic_answers(
                 continue
 
             v = ans.value
+            # A nationality is not an answer to "are you a US citizen?". The
+            # profile records citizenship as "Indian"; on a yes/no attestation
+            # that matched nothing, and inferring "No" from it would be this
+            # code deciding a legal question about someone's status. Hand it
+            # back instead.
+            if key == "citizenship" and isinstance(v, str):
+                yes_no = {o.lower() for o in real_options(f)} <= {"yes", "no"}
+                if (yes_no and real_options(f)) or f.kind in (
+                        FieldKind.RADIO, FieldKind.CHECKBOX):
+                    if v.strip().lower() not in ("yes", "no"):
+                        answers.append(ProposedAnswer(
+                            f.field_id, None, AnswerSource.PROFILE, 0.0,
+                            f"profile records citizenship as {v!r}, which does not "
+                            f"answer a yes/no question about a specific country",
+                            needs_human=True,
+                            blocked_reason=(
+                                f"'{f.label[:70]}' asks yes/no; the profile holds "
+                                f"a nationality")))
+                        continue
+
             # A work-authorisation question often offers qualified variants:
             # "Yes, and I will not need sponsorship" beside "Yes, but I will
             # need sponsorship in the future". Answering the bare "Yes" picks
