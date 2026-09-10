@@ -398,19 +398,33 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
     # and the control looks like it has none. Clearing also focuses the box,
     # which opens the menu with everything in it -- so read it here rather than
     # clicking again, because a click on an open react-select closes it.
+    # Clearing the box does three useful things at once: it removes filter text
+    # that would hide every option, it focuses the control, and that focus
+    # opens the menu (aria-expanded goes true, and aria-controls appears --
+    # these inputs have neither until then, so reading the options depends on
+    # this step working). A click instead would close a menu already open.
     pre_opts: list[str] = []
-    with contextlib.suppress(Exception):
-        # Clearing the box does three useful things at once: it removes filter
-        # text that would hide every option, it focuses the control, and that
-        # focus opens the menu (aria-expanded goes true). Reading here avoids
-        # the click entirely -- a click on an already-open react-select closes
-        # it, which is how this control reported "no options" for five runs.
-        await loc.fill("")
-        await asyncio.sleep(0.4)
-        pre_opts = await _own_options(page, field)
-        if pre_opts:
-            log.debug("fill.combobox_menu_on_focus", label=field.label[:40],
-                      count=len(pre_opts))
+    for attempt in (1, 2):
+        try:
+            await loc.fill("")
+            await asyncio.sleep(0.4)
+            pre_opts = await _own_options(page, field)
+            if pre_opts:
+                log.debug("fill.combobox_menu_on_focus", label=field.label[:40],
+                          count=len(pre_opts))
+            break
+        except Exception as exc:  # noqa: BLE001
+            # Almost always "covered by <DIV>": the previous field's menu is
+            # still up. Swallowing this silently cost four required dropdowns
+            # on one form, each reported as having no options at all.
+            log.debug("fill.combobox_clear_blocked", label=field.label[:40],
+                      attempt=attempt, error=str(exc)[:80])
+            if attempt == 2:
+                break
+            await _close_open_menus(page)
+            with contextlib.suppress(Exception):
+                await loc.scroll_into_view_if_needed()
+            await asyncio.sleep(0.3)
 
     before = set() if pre_opts else set(await _visible_options(page))
     if not pre_opts:
