@@ -171,7 +171,13 @@ def deterministic_answers(
         key = f.profile_key
 
         if key and key.startswith("identity."):
-            val = _identity_value(profile, key.split(".", 1)[1])
+            sub = key.split(".", 1)[1]
+            # A location autocomplete offers "San Jose, California, United
+            # States" beside seven other San Joses; the bare city ties with all
+            # of them and the matcher picked the Philippines.
+            if sub == "city" and f.kind is FieldKind.COMBOBOX:
+                sub = "work_address"
+            val = _identity_value(profile, sub)
             if val:
                 answers.append(ProposedAnswer(f.field_id, val, AnswerSource.PROFILE,
                                               1.0, "profile identity"))
@@ -237,6 +243,10 @@ def deterministic_answers(
                 continue
 
             v = ans.value
+            if key == "ethnicity" and re.search(r"hispanic|latino", f.label, re.I) \
+                    and isinstance(v, str) and v.lower() not in ("yes", "no"):
+                # The question is yes/no; the profile stores the ethnicity.
+                v = bool(re.search(r"hispanic|latino", v, re.I))
             opts = real_options(f)
             # A yes/no dropdown whose options are unknown until it is opened
             # still needs mapping; use the conventional pair, never "True".

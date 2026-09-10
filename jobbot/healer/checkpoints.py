@@ -290,11 +290,17 @@ async def checkpoint_verify(
     d = r.require_tool()
 
     label_to_id = {f.label.strip().lower()[:60]: f.field_id for f in form.fields}
+    known = set(label_to_id.values())
     issues = []
     for i in d.get("issues", []):
         lab = (i.get("label") or "").strip().lower()[:60]
+        fid = i.get("field_id") or ""
+        if fid not in known:
+            # The model paraphrases ids ("location_city" for candidate-location);
+            # an unknown id made the healer skip a blocker it had a fix for.
+            fid = label_to_id.get(lab, fid)
         issues.append(VerificationIssue(
-            field_id=i.get("field_id") or label_to_id.get(lab, ""),
+            field_id=fid,
             label=i.get("label", ""), problem=i.get("problem", ""),
             severity=i.get("severity", "warning"),
             suggested_value=i.get("suggested_value"),

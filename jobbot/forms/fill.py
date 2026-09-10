@@ -288,7 +288,11 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
     # what we want -- typing into a prefix-filtered widget can empty it.
     if chosen is None:
         with contextlib.suppress(Exception):
-            await loc.press_sequentially(text[:32], delay=random.randint(35, 75))
+            # Type the head of the value: a location autocomplete wants "San
+            # Jose", then offers the full "San Jose, California, United States"
+            # for the matcher to pick exactly.
+            await loc.press_sequentially(text.split(",")[0][:32],
+                                         delay=random.randint(35, 75))
             await asyncio.sleep(0.55)
         after = await _visible_options(page)
         opts = [o for o in after if o not in before] or after
