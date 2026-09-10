@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import random
 import re
 from pathlib import Path
@@ -291,6 +292,51 @@ async def _visible_options(page: Any) -> list[str]:
         return []
 
 
+_OWN_OPTIONS_JS = r"""
+(sel) => {
+  const el = document.querySelector(sel);
+  if (!el) return null;
+  const seen = [];
+  const push = root => {
+    if (!root) return;
+    for (const o of root.querySelectorAll('[role="option"], .select__option, li[id*="option"]')) {
+      const r = o.getBoundingClientRect();
+      const t = (o.innerText || '').trim();
+      if (r.width > 0 && r.height > 0 && t) seen.push(t);
+    }
+  };
+  // react-select links its menu by id, or renders it beside the control
+  const owns = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
+  if (owns) push(document.getElementById(owns));
+  if (!seen.length) {
+    let n = el;
+    for (let i = 0; i < 5 && n && n.parentElement; i++) {
+      n = n.parentElement;
+      const menu = n.querySelector('.select__menu, [class*="menu"], [role="listbox"]');
+      if (menu) { push(menu); if (seen.length) break; }
+    }
+  }
+  return [...new Set(seen)];
+}
+"""
+
+
+async def _own_options(page: Any, field: FormField) -> list[str]:
+    """The options belonging to THIS control.
+
+    Diffing "everything visible before" against "everything visible after"
+    guessed wrong in both directions: it counted another menu's options as
+    ours, and when focusing the control had already opened its menu, our click
+    closed it and the diff came out empty. Asking the control for its own menu
+    needs neither guess.
+    """
+    if not field.selector:
+        return []
+    with contextlib.suppress(Exception):
+        return await page.evaluate(_OWN_OPTIONS_JS, field.selector) or []
+    return []
+
+
 async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
     """Custom listbox widget: open it, then choose from the menu IT opened.
 
@@ -312,17 +358,46 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
     # makes the before/after diff come out empty and the fill silently no-ops.
     await _close_open_menus(page)
 
-    before = set(await _visible_options(page))
-    await loc.click()
+    # Clear any text sitting in the box first. These widgets filter their list
+    # by what is typed, so leftover text -- ours, from a previous round -- hides
+    # every option: the menu opens showing "No options" and we conclude the
+    # control has none. Cloudflare's relocation question failed this way on
+    # every round of five runs, with "Yes" still in the box and three
+    # sentence-length choices behind it.
+    # Leftover text filters the list to nothing: the menu opens on "No options"
+    # and the control looks like it has none. Clearing also focuses the box,
+    # which opens the menu with everything in it -- so read it here rather than
+    # clicking again, because a click on an open react-select closes it.
+    pre_opts: list[str] = []
+    with contextlib.suppress(Exception):
+        # Clearing the box does three useful things at once: it removes filter
+        # text that would hide every option, it focuses the control, and that
+        # focus opens the menu (aria-expanded goes true). Reading here avoids
+        # the click entirely -- a click on an already-open react-select closes
+        # it, which is how this control reported "no options" for five runs.
+        await loc.fill("")
+        await asyncio.sleep(0.4)
+        pre_opts = await _own_options(page, field)
+        if pre_opts:
+            log.debug("fill.combobox_menu_on_focus", label=field.label[:40],
+                      count=len(pre_opts))
+
+    before = set() if pre_opts else set(await _visible_options(page))
+    if not pre_opts:
+        await loc.click()
 
     # Poll rather than snapshot once. A single 450ms look was enough on an idle
     # machine and not during a run, where the same page, the same code and the
     # same widget reported "no options" three rounds running while every
     # isolated attempt found all three -- the menu simply had not painted yet.
-    after: list[str] = []
-    opts: list[str] = []
-    for _ in range(10):
+    after: list[str] = list(pre_opts)
+    opts: list[str] = list(pre_opts)
+    for _ in range(0 if pre_opts else 10):
         await asyncio.sleep(0.3)
+        own = await _own_options(page, field)
+        if own:
+            after, opts = own, own
+            break
         after = await _visible_options(page)
         opts = [o for o in after if o not in before]
         if opts:
@@ -346,6 +421,27 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
                     break
         if opts:
             log.debug("fill.combobox_opened_by_key", label=field.label[:40], count=len(opts))
+
+    if not opts and before and not after:
+        # The menu was open when we measured and our click shut it. What was
+        # visible then belongs to this control -- it was opened by focusing it.
+        opts = list(before)
+        log.debug("fill.combobox_reused_open_menu", label=field.label[:40], count=len(opts))
+
+    if not opts:
+        # Still nothing: clear whatever is in the box and look once more, in
+        # case our own typing is the filter hiding the list.
+        with contextlib.suppress(Exception):
+            await loc.fill("")
+            await loc.click()
+            for _ in range(8):
+                await asyncio.sleep(0.3)
+                after = await _visible_options(page)
+                opts = [o for o in after if o not in before]
+                if opts:
+                    log.debug("fill.combobox_unfiltered", label=field.label[:40],
+                              count=len(opts))
+                    break
 
     text = str(value)
     chosen, score, how = (None, 0.0, "no-options")
@@ -402,6 +498,15 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
         log.warning("fill.combobox_no_option", label=field.label[:50],
                     wanted=text[:40], seen=opts[:6],
                     visible_before=len(before), visible_after=len(after))
+        # A menu that never opens looks identical in the log to one we misread,
+        # and the run is the only place it happens -- every isolated attempt
+        # against the same widget works. Keep the evidence.
+        with contextlib.suppress(Exception):
+            shot = Path(os.environ.get("JOBBOT_SHOT_DIR", "data")) / (
+                "combobox_" + re.sub(r"\W+", "_", field.label[:40]) + ".png")
+            shot.parent.mkdir(parents=True, exist_ok=True)
+            await page.screenshot(path=str(shot))
+            log.info("fill.combobox_shot", path=str(shot))
         with contextlib.suppress(Exception):
             await page.keyboard.press("Escape")
         return False
