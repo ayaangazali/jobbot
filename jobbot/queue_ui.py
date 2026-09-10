@@ -25,6 +25,12 @@ transition:transform .16s cubic-bezier(.23,1,.32,1),background .16s ease-out}
 .qbar .sep{width:1px;height:20px;background:var(--line);margin:0 4px}
 .qbar .count{color:var(--dim);margin-left:auto}
 .filters a{color:var(--dim);margin-right:12px}
+.search{display:inline-flex;gap:6px;align-items:center;margin-top:4px}
+.search input{background:var(--panel);border:1px solid var(--line);border-radius:6px;
+color:var(--fg);font:inherit;padding:5px 9px;width:280px}
+.search input:focus{outline:none;border-color:var(--acc)}
+.search button{background:var(--panel);color:var(--fg);border:1px solid var(--line);
+border-radius:6px;padding:5px 11px;font:inherit;cursor:pointer}
 .filters a.on{color:var(--fg);text-decoration:underline}
 td.tick{width:30px;text-align:center}
 input[type=checkbox]{width:15px;height:15px;accent-color:var(--acc);cursor:pointer}
@@ -67,11 +73,17 @@ def _resume_box(standard: dict[str, Any]) -> str:
 
 
 def render(entries: list[Any], counts: dict[str, int], standard: dict[str, Any],
-           *, show: str = "all") -> str:
+           *, show: str = "all", q: str = "", limit: int = 300) -> str:
+    # A discovery sweep across thirty boards returns six thousand postings.
+    # Rendering all of them is a 4MB page nobody can scroll, so the list is
+    # searched and capped -- the tick is meant to be deliberate, not a scroll.
+    needle = q.strip().lower()
+    matched = [x for x in entries
+               if (show == "all" or x.decision == show)
+               and (not needle or needle in f"{x.company} {x.title} {x.location}".lower())]
+    total_matched = len(matched)
     rows = []
-    for x in entries:
-        if show != "all" and x.decision != show:
-            continue
+    for x in matched[:limit]:
         fit = f"{x.fit:.2f}" if x.fit else ""
         rows.append(
             f'<tr class="row-{e(x.decision)}" data-id="{e(x.job_id)}">'
@@ -90,6 +102,18 @@ def render(entries: list[Any], counts: dict[str, int], standard: dict[str, Any],
              f'<tbody id=rows>{"".join(rows)}</tbody></table>'
              ) or '<div class=empty>nothing here yet &mdash; run a discovery</div>'
 
+    search = (f'<form class=search method=get>'
+              f'<input type=hidden name=show value="{e(show)}">'
+              f'<input name=q value="{e(q)}" placeholder="search company or title" '
+              f'autocomplete=off>'
+              f'<button>search</button>'
+              + (f' <a href="?show={e(show)}" class=dim>clear</a>' if needle else '')
+              + f'</form>')
+    shown = (f'<div class=dim style="margin:6px 0 10px">showing {len(rows)} of '
+             f'{total_matched} match(es)'
+             + (f' &mdash; narrow the search to see the rest' if total_matched > limit else '')
+             + '</div>')
+
     filters = " ".join(
         f'<a href="?show={k}" class="{"on" if show == k else ""}">{k}'
         f'{f" ({counts.get(k, 0)})" if k != "all" else f" ({sum(counts.values())})"}</a>'
@@ -99,6 +123,7 @@ def render(entries: list[Any], counts: dict[str, int], standard: dict[str, Any],
         f"<style>{CSS}</style>"
         + _resume_box(standard)
         + f'<div class=filters style="margin-bottom:8px">{filters}</div>'
+        + search + shown
         + '<div class=qbar>'
           '<button id=all>select all</button>'
           '<button id=none>clear</button>'

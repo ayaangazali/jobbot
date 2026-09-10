@@ -164,6 +164,10 @@ def cmd_run(args) -> int:
     data_dir = Path(args.csv).parent
     queue = JobQueue(data_dir / "queue.json")
     queue.add_posts(posts, {p.job_id: fit_score(profile, p) for p in posts})
+    # An excluded company is a standing "never": record it as a decision so it
+    # is visible on the queue page rather than silently filtered at run time.
+    queue.decide_many({p.job_id: "blacklist" for p in posts
+                       if profile.excludes(p.company)})
 
     # The queue is the candidate's decision, so it outranks anything discovery
     # or the fit filter thinks. Blacklisted jobs are ones being applied to by

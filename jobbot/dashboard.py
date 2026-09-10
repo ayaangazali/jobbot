@@ -271,11 +271,12 @@ class Dash:
                 "name": name.read_text()[:120] if name.exists() else p.name,
                 "mtime": datetime.fromtimestamp(st.st_mtime).strftime("%d %b %H:%M")}
 
-    def queue_view(self, show: str = "all") -> bytes:
+    def queue_view(self, show: str = "all", search: str = "") -> bytes:
         from jobbot import queue_ui
         q = self._queue()
         return page("queue", "/queue",
-                    queue_ui.render(q.all(), q.counts(), self._standard_info(), show=show))
+                    queue_ui.render(q.all(), q.counts(), self._standard_info(),
+                                    show=show, q=search))
 
     def queue_decide(self, payload: dict[str, Any]) -> dict[str, Any]:
         decisions = payload.get("decisions") or {}
@@ -792,7 +793,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/app/"):
                 self._send(d.app_detail(unquote(path[5:])))
             elif path == "/queue":
-                self._send(d.queue_view((qs.get("show") or ["all"])[0]))
+                self._send(d.queue_view((qs.get("show") or ["all"])[0],
+                                        (qs.get("q") or [""])[0]))
             elif path == "/answers":
                 self._send(d.answers_view(bool(qs.get("blank"))))
             elif path == "/profile":
