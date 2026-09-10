@@ -71,6 +71,12 @@ class RunConfig:
     make_github_project: bool = True
     publish_project_private: bool = False
     max_heal_rounds: int = 4
+    # Stay on one application until it is submitted. A form that has been
+    # filled and healed represents real work and a real tab; abandoning it to
+    # start the next job throws that away and leaves the candidate with
+    # nothing. With this set, an application that cannot be healed halts the
+    # run with its tab still open, to be diagnosed rather than repeated.
+    persist_until_submitted: bool = False
     max_resume_rounds: int = 5
     min_match_score: float = 0.5
     max_ghost_score: float = 0.6
@@ -79,6 +85,15 @@ class RunConfig:
     notify: bool = True
     notify_to: str | None = None
     pace_seconds: tuple[float, float] = (25.0, 70.0)
+
+
+class HaltWithTabOpen(RuntimeError):
+    """Stop the run without closing the browser, so the form can be inspected."""
+
+    def __init__(self, job_id: str, blockers: list[Any]) -> None:
+        self.job_id = job_id
+        self.blockers = blockers
+        super().__init__(f"{job_id}: {len(blockers)} blocker(s), tab left open")
 
 
 @dataclass
@@ -342,8 +357,14 @@ class Orchestrator:
             return ApplicationResult(post.job_id, "skipped", "already applied")
 
         try:
-            async with self.session.tab(post.job_id) as page:
+            async with self.session.tab(
+                    post.job_id,
+                    keep_open_on=(HaltWithTabOpen,) if self.cfg.persist_until_submitted
+                    else ()) as page:
                 return await self._apply_in_tab(page, post, audit, shots)
+        except HaltWithTabOpen:
+            # Deliberate: carries the open tab up to the caller untouched.
+            raise
         except Exception as exc:  # noqa: BLE001
             tb = traceback.format_exc()[-1200:]
             log.error("apply.crashed", job_id=post.job_id, error=str(exc)[:200])
@@ -631,6 +652,15 @@ class Orchestrator:
         if not verification.ready_to_submit or verification.blockers:
             self.tracker.update(jid, status=Status.NEEDS_HUMAN.value,
                                 error=f"{len(verification.blockers)} unresolved blockers")
+            if self.cfg.persist_until_submitted:
+                # Leave it exactly as it stands: the form filled, the tab open,
+                # the page live. Closing it would discard the work and the next
+                # attempt would start from an empty form.
+                log.error("apply.halted_open", job_id=jid,
+                          blockers=[i.label[:60] for i in verification.blockers])
+                (audit / "blockers.txt").write_text(
+                    "\n".join(f"{i.label}: {i.problem}" for i in verification.blockers))
+                raise HaltWithTabOpen(jid, verification.blockers)
             return ApplicationResult(jid, Status.NEEDS_HUMAN.value,
                                      "verification not clean", heal_rounds=rounds,
                                      flagged=[i.problem for i in verification.blockers],

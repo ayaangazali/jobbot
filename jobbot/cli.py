@@ -14,7 +14,9 @@ import structlog
 from jobbot.browser.session import BrowserConfig, BrowserSession
 from jobbot.discovery.sources import Discovery, JobPost, ghost_score
 from jobbot.llm.client import LLMClient
-from jobbot.orchestrator import Orchestrator, RunConfig, fit_score
+from jobbot.orchestrator import (
+    HaltWithTabOpen, Orchestrator, RunConfig, fit_score,
+)
 from jobbot.profile import Profile
 from jobbot.queue import JobQueue
 from jobbot.tracker.csv_tracker import Status, Tracker
@@ -201,6 +203,8 @@ def cmd_run(args) -> int:
         # approved nine roles at one company one at a time, and silently
         # dropping six of them would be the software overriding the person.
         per_company_cap=10_000 if args.approved else RunConfig.per_company_cap,
+        persist_until_submitted=args.persist,
+        max_heal_rounds=12 if args.persist else RunConfig.max_heal_rounds,
     )
 
     async def go():
@@ -209,6 +213,13 @@ def cmd_run(args) -> int:
         try:
             orch = Orchestrator(profile, session, llm, tracker, cfg)
             return await orch.run(posts, limit=args.limit)
+        except HaltWithTabOpen as halt:
+            print(f"\nHALTED on {halt.job_id} with the tab still open:")
+            for b in halt.blockers:
+                print(f"  - {b.label[:70]}: {b.problem[:150]}")
+            print("\nThe form is filled and live. Nothing was submitted and "
+                  "nothing was discarded.")
+            await asyncio.Event().wait()
         finally:
             if args.keep_open:
                 # The window is the only way to inspect what was actually
@@ -332,6 +343,9 @@ def main(argv: list[str] | None = None) -> int:
                                     "(default: data/standard_resume.pdf if present)")
     r.add_argument("--tailor", action="store_true",
                    help="generate a resume per application instead of sending the standard one")
+    r.add_argument("--persist", action="store_true",
+                   help="work one application until it submits; on failure stop "
+                        "with the tab open instead of moving on")
     r.add_argument("--keep-open", action="store_true",
                    help="leave the browser open after the run instead of closing it")
     r.add_argument("--no-project", action="store_true")

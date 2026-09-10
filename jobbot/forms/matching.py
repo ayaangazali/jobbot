@@ -58,6 +58,17 @@ _STATE_CODES = {
 }
 
 
+# A code that follows a comma is a state: "Costa Mesa, CA (HQ)", "Seattle, WA".
+# Bare "in"/"or"/"ok" in a sentence never is, and neither is "CA" with no comma
+# before it, so the comma is what makes this safe to apply anywhere in a string.
+_COMMA_STATE = re.compile(r",\s*([A-Za-z]{2})\b")
+
+
+def _expand_comma_states(s: str) -> str:
+    return _COMMA_STATE.sub(
+        lambda m: ", " + _STATE_CODES.get(m.group(1).lower(), m.group(1)), s)
+
+
 def _expand_trailing_state(words: list[str]) -> list[str]:
     if len(words) >= 2 and words[-1] in _STATE_CODES:
         return words[:-1] + _STATE_CODES[words[-1]].split()
@@ -68,7 +79,7 @@ def normalize(s: str) -> str:
     # The profile says "San José State University" and the picker lists
     # "San Jose State University"; comparing those as different strings left a
     # required field empty.
-    s = fold_accents(s)
+    s = _expand_comma_states(fold_accents(s))
     s = s.lower().replace("’", "'").replace("‘", "'")
     s = s.replace("'", "")
     s = _PUNCT.sub(" ", s)

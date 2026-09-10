@@ -194,29 +194,41 @@ class BrowserSession:
         return len(self.ctx.pages) if self.ctx is not None else 0
 
     @contextlib.asynccontextmanager
-    async def tab(self, label: str = "tab") -> AsyncIterator[Any]:
-        """Lease one tab from the budget. Always closed on exit.
+    async def tab(self, label: str = "tab", *, keep_open_on: tuple = ()) -> AsyncIterator[Any]:
+        """Lease one tab from the budget. Closed on exit, with one exception.
 
         Blocks rather than raising when the budget is full, so callers
         self-throttle instead of needing their own queue.
+
+        `keep_open_on` names exception types that must leave the page standing:
+        a filled application is worth more open for inspection than closed for
+        tidiness, and closing it discards the work rather than preserving it.
         """
         if self.ctx is None:
             await self.start()
         await self._sem.acquire()
         page = None
+        keep = False
         try:
             page = await self.ctx.new_page()
             self._live.add(page)
             log.debug("browser.tab_open", label=label, live=len(self._live))
             yield page
+        except keep_open_on as exc:   # noqa: B030 -- an empty tuple catches nothing
+            keep = True
+            log.warning("browser.tab_left_open", label=label, why=type(exc).__name__)
+            raise
         finally:
-            if page is not None:
+            # No `return` here: returning from a finally block swallows the
+            # exception on its way out, which would cancel the very halt that
+            # asked for the tab to stay open.
+            if not keep and page is not None:
                 self._live.discard(page)
                 with contextlib.suppress(Exception):
                     if not page.is_closed():
                         await page.close()
+                log.debug("browser.tab_closed", label=label, live=len(self._live))
             self._sem.release()
-            log.debug("browser.tab_closed", label=label, live=len(self._live))
 
     async def reap_orphans(self) -> int:
         """Close tabs the governor never issued.
