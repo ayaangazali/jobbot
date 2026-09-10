@@ -38,11 +38,16 @@ _EXTRACT_JS = r"""
     return r.width > 0 && r.height > 0;
   };
 
+  // Quote a value for use INSIDE an attribute selector. Not CSS.escape: that
+  // is for identifiers, and using it inside quotes turns an id beginning with
+  // a digit into "\32 ba77b0f..." -- a selector that matches nothing. Ashby
+  // ids are UUIDs, so roughly half of them begin with a digit.
+  const attrEsc = (v) => String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
   const labelFor = (el) => {
     // 1. explicit label[for=id] -- the only join that cannot mis-associate
     if (el.id) {
-      const esc = (window.CSS && CSS.escape) ? CSS.escape(el.id) : el.id.replace(/"/g, '\\"');
-      const l = document.querySelector(`label[for="${esc}"]`);
+      const l = document.querySelector(`label[for="${attrEsc(el.id)}"]`);
       if (l && l.innerText.trim()) return l.innerText.trim();
     }
     // 2. aria-labelledby
@@ -89,10 +94,9 @@ _EXTRACT_JS = r"""
   };
 
   const cssPath = (el) => {
-    if (el.id) {
-      const esc = (window.CSS && CSS.escape) ? CSS.escape(el.id) : el.id;
-      return `#${esc}`;
-    }
+    // An attribute selector, not "#id": it needs no identifier escaping, so a
+    // leading digit or a dot in the id cannot break it.
+    if (el.id) return `[id="${attrEsc(el.id)}"]`;
     const parts = [];
     let n = el;
     while (n && n.nodeType === 1 && parts.length < 6) {

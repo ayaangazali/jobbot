@@ -328,3 +328,20 @@ def test_a_state_code_matches_the_state_name() -> None:
     assert "indiana" not in normalize("will you work in office")
     assert "oregon" not in normalize("answer yes or no")
     assert match_option("Yes", ["Yes", "No"])[0] == "Yes"
+
+
+def test_a_selector_survives_an_id_that_starts_with_a_digit() -> None:
+    """CSS.escape belongs in an identifier, not inside a quoted attribute.
+
+    Ashby ids are UUIDs, so about half begin with a digit. Escaping those into
+    "#\\32 ba77b0f-..." produced a selector matching nothing, and two required
+    fields -- LinkedIn and an essay question -- were silently never filled.
+    """
+    import re
+    from pathlib import Path
+
+    js = Path("jobbot/forms/extract.py").read_text()
+    assert 'return `[id="${attrEsc(el.id)}"]`' in js, \
+        "the id selector must be an attribute selector, which needs no escaping"
+    assert not re.search(r'label\[for="\$\{esc\}"\]', js), \
+        "a CSS-escaped id inside a quoted attribute matches nothing"

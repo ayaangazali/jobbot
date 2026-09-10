@@ -377,9 +377,10 @@ _RADIO_PICK_JS = r"""
     el.setAttribute('data-jobbot-pick', k);
     return '[data-jobbot-pick="' + k + '"]';
   };
+  const attrEsc = v => String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const labelOf = r => {
     if (r.id) {
-      const l = document.querySelector('label[for="' + (window.CSS ? CSS.escape(r.id) : r.id) + '"]');
+      const l = document.querySelector('label[for="' + attrEsc(r.id) + '"]');
       if (l) return l.innerText;
     }
     const p = r.closest('label');
@@ -422,7 +423,7 @@ _RADIO_PICK_JS = r"""
              || group.find(r => norm(r.value) === want);
     if (hit) {
       const lab = hit.id
-        ? document.querySelector('label[for="' + (window.CSS ? CSS.escape(hit.id) : hit.id) + '"]')
+        ? document.querySelector('label[for="' + attrEsc(hit.id) + '"]')
         : hit.closest('label');
       return {click: tag(lab || hit), verify: tag(hit), kind: 'radio'};
     }
