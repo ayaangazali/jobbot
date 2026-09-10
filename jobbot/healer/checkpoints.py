@@ -324,6 +324,21 @@ async def checkpoint_verify(
                 row["only_these_are_selectable"] = [o.label[:80] for o in f.options[:25]]
             intended.append(row)
 
+    # Required fields we could not answer at all never reach the list above,
+    # so the verifier could not see their choices and kept suggesting values
+    # that do not exist -- "Yes" for a list of sentences, a date for a list of
+    # month-year labels. Filling records what each control offered, so pass
+    # those lists along even where there is no intended value.
+    unanswered = [
+        {"label": f.label[:110],
+         "intended_value": "(nothing was entered)",
+         "only_these_are_selectable": [o.label[:80] for o in f.options[:25]]}
+        for f in form.fields
+        if f.required and f.options
+        and not any(a.field_id == f.field_id and a.submittable for a in answers)
+    ]
+    intended.extend(unanswered[:12])
+
     r = llm.vision(
         system=cached_system(
             "You are the last check before a job application is submitted in the "
