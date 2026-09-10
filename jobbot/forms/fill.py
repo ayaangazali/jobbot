@@ -318,6 +318,22 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
     after = await _visible_options(page)
     opts = [o for o in after if o not in before]
 
+    if not opts:
+        # The click opened nothing, or opened and lost it again -- the humanised
+        # pointer moves after pressing, and some widgets close on the blur that
+        # follows. Every one of them also opens from the keyboard. Cloudflare's
+        # relocation dropdown reported "no options" three rounds running this
+        # way, while the same code found all three of its choices when driven
+        # on its own.
+        with contextlib.suppress(Exception):
+            await loc.focus()
+            await loc.press("ArrowDown")
+            await asyncio.sleep(0.5)
+            after = await _visible_options(page)
+            opts = [o for o in after if o not in before]
+        if opts:
+            log.debug("fill.combobox_opened_by_key", label=field.label[:40], count=len(opts))
+
     text = str(value)
     chosen, score, how = (None, 0.0, "no-options")
     if opts:
