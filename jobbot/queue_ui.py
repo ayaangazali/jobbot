@@ -7,6 +7,7 @@ to, which makes an empty queue safe rather than surprising.
 
 from __future__ import annotations
 
+from datetime import date
 from html import escape as e
 from typing import Any
 
@@ -41,6 +42,12 @@ tr.row-applied td{background:#151922}
 .d-blacklist{color:var(--bad);border-color:#4a2b2b}
 .d-applied{color:var(--acc);border-color:#26405e}
 .d-pending{color:var(--dim)}
+.sub{color:var(--dim);font-size:11px;margin-top:1px}
+.sub.ok{color:var(--ok)}.sub.warn{color:var(--warn)}.sub.bad{color:var(--bad)}
+.tag{margin-left:6px;padding:0 5px;border:1px solid var(--line);border-radius:8px;
+font-size:10px;color:var(--acc)}
+td .bar{width:40px}
+table{font-size:12px}
 .saved{color:var(--ok);opacity:0;transition:opacity .2s ease-out}
 .saved.on{opacity:1}
 .drop{border:1px dashed var(--line);border-radius:6px;padding:14px;
@@ -50,6 +57,42 @@ background:var(--panel);margin-bottom:16px}
 .drop label{color:var(--acc);cursor:pointer;text-decoration:underline}
 @media (prefers-reduced-motion:reduce){.qbar button,.saved{transition:none}}
 """
+
+
+def _sub(text: str) -> str:
+    """A second line under a cell's main value, for the things you skim past."""
+    return f'<div class=sub>{e(str(text)[:52])}</div>' if text else ""
+
+
+def _age(posted: str) -> str:
+    """How stale the posting is. A three-month-old listing is usually filled."""
+    if not posted:
+        return ""
+    try:
+        days = (date.today() - date.fromisoformat(posted)).days
+    except ValueError:
+        return ""
+    cls = "ok" if days <= 14 else ("warn" if days <= 45 else "bad")
+    label = "today" if days <= 0 else f"{days}d ago"
+    return f'<div class="sub {cls}">{label}</div>'
+
+
+def _spon(v: str) -> str:
+    """Sponsorship as the list reported it -- never as advice."""
+    if not v:
+        return '<span class=dim>&mdash;</span>'
+    low = v.lower()
+    cls = ("bad" if "not offer" in low or "does not" in low or "u.s. citiz" in low
+           else "ok" if "offer" in low else "dim")
+    return f'<span class="{cls}">{e(v[:34])}</span>'
+
+
+def _fitbar(fit: float) -> str:
+    if not fit:
+        return '<span class=dim>&mdash;</span>'
+    pct = max(4, min(100, int(fit * 100)))
+    return (f'<span class=bar><i style="width:{pct}%"></i></span>'
+            f'<span class=dim>{fit:.2f}</span>')
 
 
 def _resume_box(standard: dict[str, Any]) -> str:
@@ -84,22 +127,27 @@ def render(entries: list[Any], counts: dict[str, int], standard: dict[str, Any],
     total_matched = len(matched)
     rows = []
     for x in matched[:limit]:
-        fit = f"{x.fit:.2f}" if x.fit else ""
         rows.append(
             f'<tr class="row-{e(x.decision)}" data-id="{e(x.job_id)}">'
             f'<td class=tick><input type=checkbox class=pick '
             f'{"checked" if x.decision == "approved" else ""}></td>'
-            f'<td>{e(x.company)}</td>'
-            f'<td><a href="{e(x.url)}" target=_blank rel=noopener>{e(x.title[:90])}</a></td>'
-            f'<td class=dim>{e(x.location[:34])}</td>'
-            f'<td class=dim>{fit}</td>'
-            f'<td class="dim{" bad" if x.ats in ("unknown", "") else ""}">{e(x.ats)}</td>'
+            f'<td><b>{e(x.company)}</b>{_sub(x.department)}</td>'
+            f'<td><a href="{e(x.url)}" target=_blank rel=noopener>{e(x.title[:95])}</a>'
+            f'{_sub(x.term)}</td>'
+            f'<td class=dim>{e(x.location[:40]) or "&mdash;"}'
+            f'{"<span class=tag>remote</span>" if x.remote else ""}</td>'
+            f'<td class=dim>{e(x.posted) or "&mdash;"}{_age(x.posted)}</td>'
+            f'<td>{_spon(x.sponsorship)}</td>'
+            f'<td>{_fitbar(x.fit)}</td>'
+            f'<td class="dim{" bad" if x.ats in ("unknown", "") else ""}">{e(x.ats)}'
+            f'{_sub(x.source if x.source != x.ats else "")}</td>'
             f'<td><span class="pill d-{e(x.decision)}" data-d>{e(x.decision)}</span></td>'
             f'</tr>')
 
     table = ("".join(rows) and
-             f'<table><thead><tr><th></th><th>company</th><th>title</th>'
-             f'<th>location</th><th>fit</th><th>ats</th><th>decision</th></tr></thead>'
+             f'<table><thead><tr><th></th><th>company</th><th>title / term</th>'
+             f'<th>location</th><th>posted</th><th>sponsorship</th><th>fit</th>'
+             f'<th>ats / source</th><th>decision</th></tr></thead>'
              f'<tbody id=rows>{"".join(rows)}</tbody></table>'
              ) or '<div class=empty>nothing here yet &mdash; run a discovery</div>'
 

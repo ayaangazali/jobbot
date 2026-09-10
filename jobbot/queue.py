@@ -20,6 +20,7 @@ tracker.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,9 +46,35 @@ class QueueEntry:
     discovered_at: str = ""
     decided_at: str = ""
     note: str = ""
+    # Everything below is for reading the row and deciding, not for the run.
+    posted: str = ""          # YYYY-MM-DD, as the source reported it
+    term: str = ""            # "Summer 2027", "Fall 2026", ...
+    sponsorship: str = ""     # what the source says about visa sponsorship
+    remote: bool = False
+    department: str = ""
+    source: str = ""          # which list or board it came from
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+# Anything that is not a student position. "Internal", "International" and
+# "Internship Program Manager" all contain the substring, so the match is on
+# whole words, and the manager/full-time titles are excluded outright.
+_INTERN = re.compile(
+    r"\b(intern|interns|internship|intern's|co-?op|apprentice|apprenticeship)\b"
+    r"|\bsummer\s+20\d\d\b|\bindustrial\s+placement\b", re.I)
+_NOT_INTERN = re.compile(
+    r"\b(manager|director|principal|staff|lead|head\s+of|senior|sr\.?|"
+    r"supervisor|coordinator|recruiter)\b", re.I)
+
+
+def is_internship(title: str, term: str = "") -> bool:
+    """Is this a student role? Title first, term as a tiebreak."""
+    t = title or ""
+    if _NOT_INTERN.search(t):
+        return False
+    return bool(_INTERN.search(t) or _INTERN.search(term or ""))
 
 
 class JobQueue:
@@ -108,18 +135,29 @@ class JobQueue:
         added = 0
         for p in posts:
             jid = p.job_id
-            if jid in self._entries:
+            raw = getattr(p, "raw", None) or {}
+            terms = raw.get("terms") or ([raw["season"]] if raw.get("season") else [])
+            described = dict(
+                company=p.company, title=p.title, url=p.url,
+                location=p.location or "", ats=p.ats.value,
+                posted=p.posted_at.date().isoformat() if p.posted_at else "",
+                term=", ".join(str(t) for t in terms)[:40],
+                sponsorship=str(raw.get("sponsorship") or "")[:40],
+                remote=bool(getattr(p, "remote", False)),
+                department=str(getattr(p, "department", ""))[:60],
+                source=str(raw.get("source") or p.ats.value)[:30])
+            cur = self._entries.get(jid)
+            if cur is not None:
                 # Refresh what the posting says, keep what the candidate said.
-                cur = self._entries[jid]
-                cur.title, cur.company, cur.url = p.title, p.company, p.url
-                cur.location = p.location or cur.location
+                for k, v in described.items():
+                    if v:
+                        setattr(cur, k, v)
                 if jid in fits:
                     cur.fit = round(fits[jid], 3)
                 continue
             self._entries[jid] = QueueEntry(
-                job_id=jid, company=p.company, title=p.title, url=p.url,
-                location=p.location or "", ats=p.ats.value,
-                fit=round(fits.get(jid, 0.0), 3), discovered_at=now)
+                job_id=jid, discovered_at=now,
+                fit=round(fits.get(jid, 0.0), 3), **described)
             added += 1
         if added or posts:
             self.save()
@@ -136,6 +174,22 @@ class JobQueue:
         if note:
             cur.note = note[:300]
         return True
+
+    def keep_only_internships(self) -> tuple[int, int]:
+        """Drop every non-student posting. Returns (kept, dropped).
+
+        A decision the candidate made is never dropped: a blacklisted job has
+        to stay blacklisted whether or not this classifier likes its title.
+        """
+        keep, drop = {}, 0
+        for jid, x in self._entries.items():
+            if x.decision != "pending" or is_internship(x.title, x.term):
+                keep[jid] = x
+            else:
+                drop += 1
+        self._entries = keep
+        self.save()
+        return len(keep), drop
 
     def decide_many(self, decisions: dict[str, str]) -> int:
         n = sum(1 for jid, d in decisions.items() if self.decide(jid, d))
