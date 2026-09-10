@@ -23,6 +23,7 @@ applications. A click is not confirmation. Only affirmative on-page evidence is.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass, field as dc_field

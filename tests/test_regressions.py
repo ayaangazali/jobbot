@@ -420,3 +420,34 @@ def test_an_ashby_posting_points_at_its_application_form() -> None:
     assert _ashby_apply_url({"jobUrl": "https://jobs.ashbyhq.com/dg/abc?embed=true"}) == \
         "https://jobs.ashbyhq.com/dg/abc/application?embed=true"
     assert _ashby_apply_url({}) == ""
+
+
+def test_every_module_imports_what_it_uses() -> None:
+    """A missing import only surfaces when the branch runs.
+
+    `asyncio.to_thread` was added to the healer's option-choosing path in a
+    module that did not import asyncio. Nothing failed until a form needed that
+    path, and then two applications died with "name 'asyncio' is not defined"
+    after being filled -- work thrown away by a one-line omission that no test
+    covered.
+    """
+    import ast
+    from pathlib import Path
+
+    stdlib = {"asyncio", "json", "re", "time", "os", "contextlib", "random",
+              "shutil", "traceback", "unicodedata", "csv", "html", "base64", "io"}
+    problems = []
+    for path in sorted(Path("jobbot").rglob("*.py")):
+        tree = ast.parse(path.read_text())
+        imported: set[str] = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Import):
+                imported |= {a.asname or a.name.split(".")[0] for a in n.names}
+            elif isinstance(n, ast.ImportFrom):
+                imported |= {a.asname or a.name for a in n.names}
+        used = {n.value.id for n in ast.walk(tree)
+                if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)}
+        for name in sorted(used & stdlib):
+            if name not in imported:
+                problems.append(f"{path}: uses {name}. without importing it")
+    assert not problems, "\n".join(problems)
