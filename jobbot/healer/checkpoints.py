@@ -86,14 +86,28 @@ def _merge(dom: ParsedForm, seen: dict[str, Any]) -> ParsedForm:
     markers, and legal significance. Where vision reports a field the DOM did
     not surface, keep it -- flagged, since we have no selector for it yet.
     """
-    by_label = {f.label.strip().lower()[:60]: f for f in dom.fields}
+    # Match on the label with its required-marker and punctuation removed. The
+    # DOM reads "Resume" and vision reads "Resume*"; comparing those raw meant
+    # neither matched, so one Ashby form produced seventeen fields for nine
+    # controls -- every one filled twice, and the resume attached to the
+    # optional "Resume / CV" slot while the required "Resume*" stayed empty.
+    def _key(text: str) -> str:
+        return re.sub(r"[^a-z0-9 ]", " ", (text or "").lower()).strip()[:60]
+
+    by_label = {_key(f.label): f for f in dom.fields}
 
     for vf in seen.get("fields", []):
-        key = (vf.get("label") or "").strip().lower()[:60]
+        key = _key(vf.get("label") or "")
         match = by_label.get(key)
-        if match is None:
+        if match is None and key:
+            squashed = re.sub(r"\s+", "", key)
             for lab, f in by_label.items():
-                if lab and (lab in key or key in lab) and min(len(lab), len(key)) > 12:
+                if not lab:
+                    continue
+                if re.sub(r"\s+", "", lab) == squashed:
+                    match = f
+                    break
+                if (lab in key or key in lab) and min(len(lab), len(key)) > 12:
                     match = f
                     break
         if match is not None:

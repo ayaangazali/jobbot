@@ -44,7 +44,9 @@ from jobbot.browser import capture as cap
 from jobbot.browser.session import BrowserSession
 from jobbot.discovery.sources import JobPost, ghost_score
 from jobbot.forms.fill import apply_answer, q
-from jobbot.forms.model import AnswerSource, FieldKind, ParsedForm, ProposedAnswer
+from jobbot.forms.model import (
+    AnswerSource, FieldKind, FormField, ParsedForm, ProposedAnswer,
+)
 from jobbot.healer import checkpoints as ck
 from jobbot.healer.answer import deterministic_answers, model_answers
 from jobbot.llm.client import LLMClient
@@ -550,6 +552,7 @@ class Orchestrator:
         # Always attach the resume. Nothing upstream emits an answer for a file
         # field, so without this the PDF is generated and then never uploaded --
         # which the verifier correctly refuses to submit.
+        resume_slots: list[FormField] = []
         for f in form.fields:
             if f.kind is not FieldKind.FILE:
                 continue
@@ -560,14 +563,17 @@ class Orchestrator:
                 # Not a resume slot. Leave it empty rather than upload the
                 # wrong document under a heading the reviewer will read.
                 continue
+            resume_slots.append(f)
+
+        # Attach to every required resume slot, not just the first. A form that
+        # lists an optional "Resume / CV" before the required "Resume*" left the
+        # required one empty, and the page refused to submit with "Please select
+        # a file". If none is marked required, the first slot is the resume slot.
+        required_slots = [f for f in resume_slots if f.required]
+        for f in (required_slots or resume_slots[:1]):
             answers.append(ProposedAnswer(
                 f.field_id, str(resume_pdf), AnswerSource.PROFILE, 1.0,
                 "tailored resume for this role"))
-            # One resume, one slot. Vision reports the same upload twice (as
-            # "Attach" and as "Resume/CV"), the duplicate carries no selector,
-            # and upload_file's input[type=file] fallback then guessed -- it
-            # picked the cover-letter input and the verifier blocked on it.
-            break
 
         by_id = {f.field_id: f for f in form.fields}
         filled = 0
