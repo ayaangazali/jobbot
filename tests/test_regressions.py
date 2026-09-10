@@ -309,3 +309,22 @@ def test_excluded_companies_are_never_queued() -> None:
     assert p.excludes("EXAMPLE CORP")
     assert not p.excludes("Nuro") and not p.excludes("")
     assert not Profile.model_validate({"identity": {}}).excludes("Palantir")
+
+
+def test_a_state_code_matches_the_state_name() -> None:
+    """A location dropdown says "Seattle, WA"; the answer says the state in full.
+
+    Those scored below every threshold, so a required location field stayed
+    empty through four heal rounds and the application could not be submitted.
+    """
+    from jobbot.forms.matching import match_option, normalize
+
+    assert match_option("Seattle, Washington, United States",
+                        ["Seattle, WA", "Costa Mesa, CA (HQ)"])[0] == "Seattle, WA"
+    assert match_option("San Jose, California, United States",
+                        ["San Jose, CA", "Austin, TX"])[0] == "San Jose, CA"
+
+    # Only a trailing code expands: these are ordinary words mid-sentence.
+    assert "indiana" not in normalize("will you work in office")
+    assert "oregon" not in normalize("answer yes or no")
+    assert match_option("Yes", ["Yes", "No"])[0] == "Yes"

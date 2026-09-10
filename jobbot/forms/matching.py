@@ -35,6 +35,35 @@ def fold_accents(s: str) -> str:
                    if not unicodedata.combining(c))
 
 
+# A location dropdown says "Seattle, WA" and the answer we hold says "Seattle,
+# Washington, United States". Those scored below every threshold and a required
+# field was left empty. Only a TRAILING two-letter code is expanded: "IN", "OR",
+# "OK", "ME" and "HI" are ordinary words, and expanding them mid-sentence would
+# turn "will you work in office" into "will you work indiana office".
+_STATE_CODES = {
+    "al": "alabama", "ak": "alaska", "az": "arizona", "ar": "arkansas",
+    "ca": "california", "co": "colorado", "ct": "connecticut", "de": "delaware",
+    "fl": "florida", "ga": "georgia", "hi": "hawaii", "id": "idaho",
+    "il": "illinois", "in": "indiana", "ia": "iowa", "ks": "kansas",
+    "ky": "kentucky", "la": "louisiana", "me": "maine", "md": "maryland",
+    "ma": "massachusetts", "mi": "michigan", "mn": "minnesota", "ms": "mississippi",
+    "mo": "missouri", "mt": "montana", "ne": "nebraska", "nv": "nevada",
+    "nh": "new hampshire", "nj": "new jersey", "nm": "new mexico", "ny": "new york",
+    "nc": "north carolina", "nd": "north dakota", "oh": "ohio", "ok": "oklahoma",
+    "or": "oregon", "pa": "pennsylvania", "ri": "rhode island",
+    "sc": "south carolina", "sd": "south dakota", "tn": "tennessee", "tx": "texas",
+    "ut": "utah", "vt": "vermont", "va": "virginia", "wa": "washington",
+    "wv": "west virginia", "wi": "wisconsin", "wy": "wyoming",
+    "dc": "district of columbia",
+}
+
+
+def _expand_trailing_state(words: list[str]) -> list[str]:
+    if len(words) >= 2 and words[-1] in _STATE_CODES:
+        return words[:-1] + _STATE_CODES[words[-1]].split()
+    return words
+
+
 def normalize(s: str) -> str:
     # The profile says "San José State University" and the picker lists
     # "San Jose State University"; comparing those as different strings left a
@@ -43,7 +72,7 @@ def normalize(s: str) -> str:
     s = s.lower().replace("’", "'").replace("‘", "'")
     s = s.replace("'", "")
     s = _PUNCT.sub(" ", s)
-    return _WS.sub(" ", s).strip()
+    return " ".join(_expand_trailing_state(_WS.sub(" ", s).strip().split()))
 
 
 def _stem(w: str) -> str:
