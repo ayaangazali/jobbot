@@ -507,6 +507,13 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
 
     # Typing narrows a long list. Only if the opened menu did not already offer
     # what we want -- typing into a prefix-filtered widget can empty it.
+    #
+    # Keep what the menu offered before typing. Typing a value the list does
+    # not contain filters it to nothing, and overwriting `opts` with that empty
+    # result threw away the only record of the real choices: the failure logged
+    # "seen=[]" and the field went to the verifier with no options, so the
+    # second answering pass had nothing to choose from.
+    discovered = list(opts)
     if chosen is None:
         with contextlib.suppress(Exception):
             # Type the head of the value: a location autocomplete wants "San
@@ -525,7 +532,7 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
             after = await _visible_options(page)
             if [o for o in after if o not in before]:
                 break
-        opts = [o for o in after if o not in before] or after
+        opts = [o for o in after if o not in before] or after or discovered
         if opts:
             ack = match_acknowledgement(value, opts)
             if ack is not None:
@@ -540,6 +547,7 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
         # that only exists once opened, so the answer was composed blind --
         # "Yes" against a list of three full sentences. With the options on the
         # field, the verifier can suggest one that exists.
+        opts = opts or discovered
         if opts:
             from jobbot.forms.model import FieldOption
             field.options = [FieldOption(label=o) for o in opts[:25]]
