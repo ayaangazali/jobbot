@@ -158,6 +158,16 @@ _EXTRACT_JS = r"""
     else if (type === 'date')    { kind = 'date'; }
 
     const raw = labelFor(el);
+
+    // A scripted date picker is an ordinary text input whose placeholder is
+    // the only clue: Ashby's says "Pick date...". Left as text, the model
+    // answered it in prose -- "Immediately - I can start this month" -- and
+    // the form sat there with no date selected. \bdate\b, so "update" and
+    // "candidate" do not qualify.
+    if (kind === 'text') {
+      const hint = ((el.getAttribute('placeholder') || '') + ' ' + raw).toLowerCase();
+      if (/\bdate\b|mm\s*\/\s*dd|dd\s*\/\s*mm|yyyy/.test(hint)) kind = 'date';
+    }
     out.push({
       label: raw.replace(/^~/, '').replace(/\s*\*\s*$/, '').trim(),
       label_is_proximity: raw.startsWith('~'),
