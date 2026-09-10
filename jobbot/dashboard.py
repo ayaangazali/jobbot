@@ -633,9 +633,14 @@ class Dash:
              "ok": bool(prof) and not prof.missing_legally_significant(),
              "detail": ", ".join(prof.missing_legally_significant())
                        if prof else "needs a profile first"},
-            {"name": "ANTHROPIC_API_KEY", "ok": bool(os.environ.get("ANTHROPIC_API_KEY")),
-             "detail": "set" if os.environ.get("ANTHROPIC_API_KEY") else
-                       "unset — `run` cannot call the model"},
+            # Report what a fresh shell will see, not what this process happens to
+            # have inherited. The server had the key in its own environment and
+            # said "set" while the user's terminal, starting cold, did not.
+            {"name": "ANTHROPIC_API_KEY", "ok": _key_in_dotenv(),
+             "detail": "in .env" if _key_in_dotenv() else
+                       ("only in this process's environment — a new shell will not "
+                        "have it; put it in .env" if os.environ.get("ANTHROPIC_API_KEY")
+                        else "unset — `run` cannot call the model")},
             {"name": "GEMINI_API_KEY (fallback)",
              "ok": bool(os.environ.get("GEMINI_API_KEY")),
              "detail": "set" if os.environ.get("GEMINI_API_KEY") else
@@ -820,6 +825,17 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # noqa: BLE001
             log.warning("dashboard.post_failed", path=path, error=repr(exc)[:300])
             self._json({"ok": False, "errors": [repr(exc)[:300]]}, 500)
+
+
+def _key_in_dotenv() -> bool:
+    """Is ANTHROPIC_API_KEY set in a .env file the code will actually read?"""
+    for p in (Path(".env"), Path(__file__).resolve().parents[1] / ".env"):
+        if p.exists():
+            for line in p.read_text().splitlines():
+                k, _, v = line.strip().partition("=")
+                if k == "ANTHROPIC_API_KEY" and v.strip() and not v.startswith("sk-ant-..."):
+                    return True
+    return False
 
 
 def tailscale_ip() -> str | None:
