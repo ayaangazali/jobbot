@@ -83,6 +83,11 @@ _SCREENING_MAP: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bhispanic\b|\blatino\b", re.I), "ethnicity"),
     (re.compile(r"(at least|over|are you).{0,12}18", re.I), "age_over_18"),
     (re.compile(r"security clearance|clearance", re.I), "government_clearance"),
+    # Defence and aerospace employers all ask this, in ITAR's own words. Left
+    # unmapped it reached the model, which correctly refused it, and the
+    # application then halted on an unanswerable required field.
+    (re.compile(r"export control|\bitar\b|\bear\b\s+regulat|protected individual"
+                r"|u\.?s\.? person\b", re.I), "export_control_us_person"),
     (re.compile(r"non-?compete", re.I), "non_compete"),
     (re.compile(r"(previously|ever).{0,30}(work|employ).{0,20}(here|for us|at)", re.I), "previously_employed_here"),
     (re.compile(r"(ever\s+)?interviewed?\b.{0,30}(here|before|with us|at)", re.I), "previously_interviewed_here"),

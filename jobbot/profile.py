@@ -57,6 +57,7 @@ LEGALLY_SIGNIFICANT = frozenset({
     "date_of_birth",
     "age_over_18",
     "government_clearance",
+    "export_control_us_person",
     "non_compete",
     "previously_employed_here",
     "related_to_employee",

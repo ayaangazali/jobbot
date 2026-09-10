@@ -101,6 +101,10 @@ SCREENING_SPEC: list[dict[str, Any]] = [
      "label": "Are you related to a current employee?"},
     {"key": "government_clearance", "kind": "bool", "legal": True,
      "label": "Do you hold a government security clearance?"},
+    {"key": "export_control_us_person", "kind": "bool", "legal": True,
+     "label": "Are you a U.S. person for export-control purposes? "
+              "(U.S. citizen, lawful permanent resident, asylee or refugee. "
+              "Asked by defence and aerospace employers under ITAR/EAR.)"},
     {"key": "non_compete", "kind": "bool", "legal": True,
      "label": "Are you bound by a non-compete or similar agreement?"},
     {"key": "professional_license", "kind": "bool", "legal": True,
