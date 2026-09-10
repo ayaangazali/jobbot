@@ -81,6 +81,11 @@ def _looks_like_a_description(v: str) -> bool:
     return bool(_DESCRIPTION_MARKERS.search(v))
 
 
+# A label that is really just the control's own prompt to the user.
+_IS_PLACEHOLDER = re.compile(
+    r"^\s*(start typing|type here|select\b|pick |choose |search\b|enter )", re.I)
+
+
 def _merge(dom: ParsedForm, seen: dict[str, Any]) -> ParsedForm:
     """Reconcile the vision reading with the DOM reading.
 
@@ -121,7 +126,23 @@ def _merge(dom: ParsedForm, seen: dict[str, Any]) -> ParsedForm:
             # field has the same distinctive kind, it is that field -- and
             # keeping them apart left the answer on the vision copy, which has
             # no selector and so can never be filled.
-            if (vf.get("kind") or "") in {"date", "file", "textarea", "phone", "email"}:
+            # A control whose only label is its own placeholder -- "Start
+            # typing...", "Select...", "Pick date..." -- tells the model
+            # nothing about what is being asked. Dedalus Labs' "which
+            # programming languages" field reads as "Start typing...", so it
+            # was answered blind and the submit was refused for a missing
+            # required field. Vision reads the question above it; take that.
+            same_kind = [f for f in dom.fields
+                         if f.kind.value == (vf.get("kind") or "")
+                         and id(f) not in claimed]
+            placeholders = [f for f in same_kind if _IS_PLACEHOLDER.match(f.label or "")]
+            if len(placeholders) == 1 and (vf.get("label") or ""):
+                match = placeholders[0]
+                match.label = vf["label"][:200]
+                log.debug("merge.label_from_vision", label=match.label[:50])
+
+            if match is None and (vf.get("kind") or "") in {
+                    "date", "file", "textarea", "phone", "email"}:
                 same = [f for f in dom.fields
                         if f.kind.value == vf["kind"] and id(f) not in claimed]
                 if len(same) == 1:
