@@ -345,3 +345,26 @@ def test_a_selector_survives_an_id_that_starts_with_a_digit() -> None:
         "the id selector must be an attribute selector, which needs no escaping"
     assert not re.search(r'label\[for="\$\{esc\}"\]', js), \
         "a CSS-escaped id inside a quoted attribute matches nothing"
+
+
+def test_yes_maps_onto_a_sentence_without_asserting_a_fact() -> None:
+    """Cloudflare offers three sentences where the answer we hold is "Yes".
+
+    "Yes" matched none of them and a required field stayed empty. Mapping it is
+    safe only in one direction: a willingness is true of someone open to
+    relocating, whereas "I currently live in this job's location" is a claim
+    about where they live.
+    """
+    from jobbot.forms.matching import match_yes_no_prose
+
+    opts = ["I currently live in this job's location.",
+            "I am willing to relocate to this job's location.",
+            "I do not live and not willing to relocate to this job's location."]
+    assert match_yes_no_prose("Yes", opts) == opts[1], "prefer the willingness"
+    assert match_yes_no_prose("No", opts) == opts[2]
+
+    # Leave literal yes/no lists to the ordinary matcher.
+    assert match_yes_no_prose("Yes", ["Yes", "No"]) is None
+    # Two factual affirmatives: declining beats putting words in their mouth.
+    assert match_yes_no_prose(
+        "Yes", ["I have a degree", "I have a licence", "I have neither"]) is None

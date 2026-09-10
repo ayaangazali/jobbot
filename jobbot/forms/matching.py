@@ -185,6 +185,54 @@ def match_boolean(value: object, options: Sequence[str]) -> str | None:
     return None
 
 
+_NEGATED = re.compile(r"\b(not|no|never|unable|unwilling|decline|don'?t|cannot)\b", re.I)
+# A willingness, not an assertion about where someone lives or what they hold.
+_NONCOMMITTAL = re.compile(r"\b(willing|able|open to|prepared to|happy to)\b", re.I)
+
+
+def match_yes_no_prose(value: object, options: Sequence[str]) -> str | None:
+    """Map yes/no onto options written as sentences.
+
+    Cloudflare asks "Do you currently live or are you willing to relocate?" and
+    offers three sentences; the answer we hold is "Yes", which matches none of
+    them, so a required field stayed empty.
+
+    For "no", take the negated option. For "yes", prefer an option stating a
+    willingness over one asserting a fact: "I am willing to relocate" is true
+    of a candidate open to relocating, while "I currently live in this job's
+    location" may not be, and choosing between two factual claims would put a
+    statement in the candidate's mouth. With no willingness option and more
+    than one affirmative, this declines rather than guess.
+    """
+    if isinstance(value, bool):
+        yes = value
+    else:
+        nv = normalize(str(value))
+        if nv in {normalize(x) for x in _YES}:
+            yes = True
+        elif nv in {normalize(x) for x in _NO}:
+            yes = False
+        else:
+            return None
+
+    # Only meaningful when the options are prose, not literal yes/no labels.
+    if any(normalize(o) in {normalize(w) for w in (*_YES, *_NO)} for o in options):
+        return None
+
+    negated = [o for o in options if _NEGATED.search(o)]
+    affirmative = [o for o in options if o not in negated]
+
+    if not yes:
+        return negated[0] if len(negated) == 1 else None
+
+    willing = [o for o in affirmative if _NONCOMMITTAL.search(o)]
+    if len(willing) == 1:
+        return willing[0]
+    if len(affirmative) == 1:
+        return affirmative[0]
+    return None
+
+
 _RANGE_PATTERNS = [
     # "5-7", "5 - 7", "5 to 7"
     (re.compile(r"(\d+)\s*(?:-|–|to)\s*(\d+)"), "range"),

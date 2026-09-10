@@ -43,6 +43,7 @@ from jobbot.forms.matching import (
     is_decline, match_acknowledgement, match_boolean, match_decline,
     match_numeric_range, match_option,
     fold_accents,
+    match_yes_no_prose,
 )
 from jobbot.forms.model import FieldKind, FormField, ProposedAnswer
 
@@ -456,6 +457,10 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
                 chosen, score, how = d, 1.0, "decline-synonym"
         if chosen is None:
             chosen, score, how = match_option(text, opts)
+        if chosen is None:
+            prose = match_yes_no_prose(value, opts)
+            if prose is not None:
+                chosen, score, how = prose, 0.8, "yes-no-prose"
 
     # Typing narrows a long list. Only if the opened menu did not already offer
     # what we want -- typing into a prefix-filtered widget can empty it.
