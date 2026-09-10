@@ -85,7 +85,7 @@ background:var(--line);border-radius:3px;overflow:hidden;margin-right:6px}
 margin-bottom:14px;color:var(--acc)}
 """
 
-NAV = [("/", "overview"), ("/answers", "answers"), ("/profile", "profile"),
+NAV = [("/", "overview"), ("/queue", "queue"), ("/answers", "answers"), ("/profile", "profile"),
        ("/edit", "edit profile"), ("/intake", "intake"), ("/lessons", "lessons"),
        ("/log", "notifications"), ("/status", "status")]
 
@@ -95,6 +95,12 @@ ROUTES = [
     {"path": "/", "method": "GET", "what": "run tiles + every posting, auto-refreshing"},
     {"path": "/app/<audit-dir>", "method": "GET",
      "what": "one application: answers, verification, resume, screenshots"},
+    {"path": "/queue", "method": "GET",
+     "what": "every discovered job: tick the ones to apply to, blacklist your own"},
+    {"path": "/api/queue", "method": "POST",
+     "what": "record approve / blacklist / un-decide for the ticked jobs"},
+    {"path": "/api/standard-resume", "method": "POST",
+     "what": "upload the one PDF sent to every application"},
     {"path": "/answers", "method": "GET",
      "what": "every answer given in your name (?blank=1 for just the gaps)"},
     {"path": "/profile", "method": "GET", "what": "read-only profile summary"},
@@ -245,6 +251,51 @@ class Dash:
 
     def answers(self) -> list[dict[str, str]]:
         return read_csv(self.data / "answers.csv")
+
+    # -- the queue ---------------------------------------------------------
+
+    def _queue(self) -> Any:
+        from jobbot.queue import JobQueue
+        return JobQueue(self.data / "queue.json")
+
+    def standard_resume_path(self) -> Path:
+        return self.data / "standard_resume.pdf"
+
+    def _standard_info(self) -> dict[str, Any]:
+        p = self.standard_resume_path()
+        if not p.exists():
+            return {"exists": False}
+        st = p.stat()
+        name = (self.data / "standard_resume.name")
+        return {"exists": True, "kb": st.st_size // 1024,
+                "name": name.read_text()[:120] if name.exists() else p.name,
+                "mtime": datetime.fromtimestamp(st.st_mtime).strftime("%d %b %H:%M")}
+
+    def queue_view(self, show: str = "all") -> bytes:
+        from jobbot import queue_ui
+        q = self._queue()
+        return page("queue", "/queue",
+                    queue_ui.render(q.all(), q.counts(), self._standard_info(), show=show))
+
+    def queue_decide(self, payload: dict[str, Any]) -> dict[str, Any]:
+        decisions = payload.get("decisions") or {}
+        if not isinstance(decisions, dict):
+            return {"ok": False, "error": "decisions must be an object"}
+        q = self._queue()
+        n = q.decide_many({str(k): str(v) for k, v in decisions.items()})
+        return {"ok": True, "changed": n, "counts": q.counts()}
+
+    def save_standard_resume(self, body: bytes, name: str) -> dict[str, Any]:
+        if not body.startswith(b"%PDF"):
+            # A .doc or an HTML error page saved here would be uploaded to an
+            # employer under the candidate's name; check the bytes, not the name.
+            return {"ok": False, "error": "that is not a PDF"}
+        dest = self.standard_resume_path()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(body)
+        (self.data / "standard_resume.name").write_text(name[:120] or dest.name)
+        log.info("dashboard.standard_resume_saved", bytes=len(body), name=name[:80])
+        return {"ok": True, "kb": len(body) // 1024}
 
     def overview(self) -> bytes:
         apps = self.apps()
@@ -740,6 +791,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(d.overview())
             elif path.startswith("/app/"):
                 self._send(d.app_detail(unquote(path[5:])))
+            elif path == "/queue":
+                self._send(d.queue_view((qs.get("show") or ["all"])[0]))
             elif path == "/answers":
                 self._send(d.answers_view(bool(qs.get("blank"))))
             elif path == "/profile":
@@ -797,6 +850,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/profile":
                 self._json(self.dash.save_profile(json.loads(body or b"{}")))
+            elif path == "/api/queue":
+                self._json(self.dash.queue_decide(json.loads(body or b"{}")))
+            elif path == "/api/standard-resume":
+                name = (parse_qs(urlparse(self.path).query).get("name") or [""])[0]
+                self._json(self.dash.save_standard_resume(body, unquote(name)))
             elif path.startswith("/api/intake/"):
                 fn = {"organize": self.dash.intake_organize,
                       "questions": self.dash.intake_questions,

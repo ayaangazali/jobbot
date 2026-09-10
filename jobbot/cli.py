@@ -16,7 +16,8 @@ from jobbot.discovery.sources import Discovery, JobPost, ghost_score
 from jobbot.llm.client import LLMClient
 from jobbot.orchestrator import Orchestrator, RunConfig, fit_score
 from jobbot.profile import Profile
-from jobbot.tracker.csv_tracker import Tracker
+from jobbot.queue import JobQueue
+from jobbot.tracker.csv_tracker import Status, Tracker
 
 log = structlog.get_logger(__name__)
 DEFAULT_PROFILE = Path("config/profile.yaml")
@@ -56,6 +57,19 @@ async def _collect(sources: list[str], limit_per: int) -> list[JobPost]:
         except Exception as exc:  # noqa: BLE001
             print(f"  {spec}: {type(exc).__name__}: {str(exc)[:120]}", file=sys.stderr)
     return posts
+
+
+def _standard_resume(args, data_dir: Path) -> Path | None:
+    """The one PDF to send, unless the run explicitly asks for a tailored one."""
+    if args.tailor:
+        return None
+    p = Path(args.resume).expanduser() if args.resume else data_dir / "standard_resume.pdf"
+    if not p.exists():
+        if args.resume:
+            raise SystemExit(f"no such resume: {p}")
+        return None
+    print(f"resume: sending {p} to every application (--tailor to generate instead)")
+    return p
 
 
 def cmd_discover(args) -> int:
@@ -147,12 +161,33 @@ def cmd_run(args) -> int:
     tracker = Tracker(args.csv)
     llm = LLMClient()
 
+    data_dir = Path(args.csv).parent
+    queue = JobQueue(data_dir / "queue.json")
+    queue.add_posts(posts, {p.job_id: fit_score(profile, p) for p in posts})
+
+    # The queue is the candidate's decision, so it outranks anything discovery
+    # or the fit filter thinks. Blacklisted jobs are ones being applied to by
+    # hand; sending a second application would be worse than sending none.
+    blacklisted = queue.blacklisted_ids()
+    if blacklisted:
+        posts = [p for p in posts if p.job_id not in blacklisted]
+    if args.approved:
+        ok = queue.approved_ids()
+        posts = [p for p in posts if p.job_id in ok]
+        print(f"queue: {len(posts)} approved job(s) of {sum(queue.counts().values())} known")
+        if not posts:
+            print("nothing approved yet -- tick jobs at /queue on the dashboard")
+            return 0
+
+    standard = _standard_resume(args, data_dir)
+
     cfg = RunConfig(
         # Everything a run writes -- audit dirs, answers.csv, lessons.jsonl --
         # lives beside the tracker. Defaulting to a bare "data" meant --csv moved
         # the index but every artifact still landed in ./data of the cwd.
         data_dir=Path(args.csv).parent,
         dry_run=not args.submit,
+        standard_resume=standard,
         make_github_project=not args.no_project,
         publish_project_private=args.private_projects,
         min_match_score=args.min_match,
@@ -179,6 +214,10 @@ def cmd_run(args) -> int:
     print(f"\n{'job':<34} {'status':<16} detail")
     for r in results:
         print(f"{r.job_id[:34]:<34} {r.status:<16} {r.reason[:60]}")
+    for r in results:
+        if r.status in (Status.SUBMITTED.value, Status.CONFIRMED.value):
+            queue.decide(r.job_id, "applied")
+    queue.save()
     print(f"\ntracker: {tracker.stats()}")
     if cfg.dry_run:
         print("\nDRY RUN: forms were filled and verified but NOT submitted. "
@@ -277,6 +316,12 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--source", action="append", required=True)
     r.add_argument("--limit", type=int, default=5)
     r.add_argument("--submit", action="store_true", help="actually submit (default: dry run)")
+    r.add_argument("--approved", action="store_true",
+                   help="only apply to jobs ticked on the dashboard queue")
+    r.add_argument("--resume", help="PDF to send to every application "
+                                    "(default: data/standard_resume.pdf if present)")
+    r.add_argument("--tailor", action="store_true",
+                   help="generate a resume per application instead of sending the standard one")
     r.add_argument("--keep-open", action="store_true",
                    help="leave the browser open after the run instead of closing it")
     r.add_argument("--no-project", action="store_true")

@@ -63,6 +63,9 @@ log = structlog.get_logger(__name__)
 class RunConfig:
     data_dir: Path = Path("data")
     dry_run: bool = True              # fill everything, stop before submit
+    # When set, this exact PDF is uploaded to every application and no resume
+    # is generated. The candidate's own document, unchanged.
+    standard_resume: Path | None = None
     make_github_project: bool = True
     publish_project_private: bool = False
     max_heal_rounds: int = 4
@@ -251,6 +254,11 @@ async def _enter_embedded_form(page: Any) -> str | None:
     return src
 
 
+def resume_pdf_none() -> Path:
+    """No PDF was produced; the caller only reads the failure."""
+    return Path()
+
+
 def _keep_a_copy(pdf: Path, post: JobPost) -> None:
     """Drop a named copy where the candidate can find it.
 
@@ -344,6 +352,77 @@ class Orchestrator:
         finally:
             await self.session.reap_orphans()
 
+
+    async def _resume_for(self, page: Any, post: JobPost, audit: Path,
+                          jid: str) -> tuple[Path, str, ApplicationResult | None]:
+        """The PDF to upload, and the GitHub project to cite alongside it.
+
+        With cfg.standard_resume set, this is one file copy: the candidate's own
+        resume goes up unchanged, no model involved. That is the point -- a
+        per-application rewrite costs four minutes and half a dozen model calls,
+        and a resume the candidate did not write is one they cannot stand behind
+        in the interview it wins.
+        """
+        if self.cfg.standard_resume:
+            resume_pdf = audit / "resume.pdf"
+            shutil.copy2(self.cfg.standard_resume, resume_pdf)
+            log.info("resume.standard", job_id=jid, src=str(self.cfg.standard_resume))
+            self.tracker.update(jid, status=Status.PREPARED.value,
+                                resume_path=str(resume_pdf),
+                                match_score=fit_score(self.profile, post))
+            return resume_pdf, "", None
+
+        # --- expensive work starts here ----------------------------------
+        project_url = ""
+        extra_project = None
+        if self.cfg.make_github_project:
+            try:
+                extra_project, project_url = await asyncio.to_thread(
+                    self._build_project, post, audit)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("apply.project_failed", job_id=jid, error=str(exc)[:200])
+
+        tailored = await asyncio.to_thread(
+            tailor, self.llm, self.profile,
+            job_title=post.title, company=post.company,
+            job_description=post.description, extra_project=extra_project)
+
+        # Per-application refinement: critique as this role's hiring manager,
+        # revise, repeat. Bounded, stops on "ship", and any revision that
+        # smuggles in a new fact is discarded rather than printed.
+        tailored, critique_history = await asyncio.to_thread(
+            refine, self.llm, self.profile, tailored,
+            job_title=post.title, company=post.company,
+            job_description=post.description,
+            max_rounds=self.cfg.max_resume_rounds)
+        (audit / "resume_critique.json").write_text(json.dumps(critique_history, indent=2))
+        self._last_ats_score = float(
+            next((h.get("final_ats_score", 0.0) for h in reversed(critique_history)
+                  if "final_ats_score" in h), 0.0))
+
+        dropped = sanitize_skills(self.profile, tailored)
+        if dropped:
+            (audit / "skills_removed.txt").write_text("\n".join(dropped))
+        fabrications = fabrication_check(self.profile, tailored)
+        if fabrications:
+            # A resume that overstates is worse than no application.
+            log.error("apply.fabrication_detected", job_id=jid, problems=fabrications[:4])
+            (audit / "fabrication_report.txt").write_text("\n".join(fabrications))
+            self.tracker.update(jid, status=Status.NEEDS_HUMAN.value,
+                                error="resume fabrication check failed")
+            return resume_pdf_none(), "", ApplicationResult(
+                jid, Status.NEEDS_HUMAN.value,
+                "fabrication check failed", flagged=fabrications)
+
+        resume_pdf = audit / "resume.pdf"
+        await render_one_page(page, tailored, resume_pdf)
+        _keep_a_copy(resume_pdf, post)
+        (audit / "resume_content.json").write_text(json.dumps(tailored, indent=2))
+        self.tracker.update(jid, status=Status.PREPARED.value,
+                            resume_path=str(resume_pdf), github_project_url=project_url,
+                            match_score=fit_score(self.profile, post))
+        return resume_pdf, project_url, None
+
     async def _apply_in_tab(self, page: Any, post: JobPost, audit: Path,
                             shots: Path) -> ApplicationResult:
         jid = post.job_id
@@ -405,54 +484,10 @@ class Orchestrator:
             log.info("apply.knockout_skip", job_id=jid, reason=reason[:120])
             return ApplicationResult(jid, Status.KNOCKOUT_FAIL.value, reason)
 
-        # --- expensive work starts here ----------------------------------
-        project_url = ""
-        extra_project = None
-        if self.cfg.make_github_project:
-            try:
-                extra_project, project_url = await asyncio.to_thread(
-                    self._build_project, post, audit)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("apply.project_failed", job_id=jid, error=str(exc)[:200])
-
-        tailored = await asyncio.to_thread(
-            tailor, self.llm, self.profile,
-            job_title=post.title, company=post.company,
-            job_description=post.description, extra_project=extra_project)
-
-        # Per-application refinement: critique as this role's hiring manager,
-        # revise, repeat. Bounded, stops on "ship", and any revision that
-        # smuggles in a new fact is discarded rather than printed.
-        tailored, critique_history = await asyncio.to_thread(
-            refine, self.llm, self.profile, tailored,
-            job_title=post.title, company=post.company,
-            job_description=post.description,
-            max_rounds=self.cfg.max_resume_rounds)
-        (audit / "resume_critique.json").write_text(json.dumps(critique_history, indent=2))
-        self._last_ats_score = float(
-            next((h.get("final_ats_score", 0.0) for h in reversed(critique_history)
-                  if "final_ats_score" in h), 0.0))
-
-        dropped = sanitize_skills(self.profile, tailored)
-        if dropped:
-            (audit / "skills_removed.txt").write_text("\n".join(dropped))
-        fabrications = fabrication_check(self.profile, tailored)
-        if fabrications:
-            # A resume that overstates is worse than no application.
-            log.error("apply.fabrication_detected", job_id=jid, problems=fabrications[:4])
-            (audit / "fabrication_report.txt").write_text("\n".join(fabrications))
-            self.tracker.update(jid, status=Status.NEEDS_HUMAN.value,
-                                error="resume fabrication check failed")
-            return ApplicationResult(jid, Status.NEEDS_HUMAN.value,
-                                     "fabrication check failed", flagged=fabrications)
-
-        resume_pdf = audit / "resume.pdf"
-        await render_one_page(page, tailored, resume_pdf)
-        _keep_a_copy(resume_pdf, post)
-        (audit / "resume_content.json").write_text(json.dumps(tailored, indent=2))
-        self.tracker.update(jid, status=Status.PREPARED.value,
-                            resume_path=str(resume_pdf), github_project_url=project_url,
-                            match_score=fit_score(self.profile, post))
+        # --- resume ------------------------------------------------------
+        resume_pdf, project_url, failure = await self._resume_for(page, post, audit, jid)
+        if failure is not None:
+            return failure
 
         # Re-navigate: rendering the PDF took this tab to a file:// URL.
         await page.goto(form_url, wait_until="domcontentloaded")
