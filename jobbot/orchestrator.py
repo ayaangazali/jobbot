@@ -677,8 +677,12 @@ class Orchestrator:
             applied_companies[c] = applied_companies.get(c, 0) + 1
 
         queue: list[tuple[float, JobPost]] = []
+        excluded = 0
         for p in posts:
             if self.tracker.already_applied(p.job_id):
+                continue
+            if self.profile.excludes(p.company):
+                excluded += 1
                 continue
             # Never queue a posting we cannot apply to on its own ATS.
             # An unresolved aggregator listing means the only route is the
@@ -716,6 +720,7 @@ class Orchestrator:
         for _, p_ in queue:
             by_tier[role_tier(p_)] = by_tier.get(role_tier(p_), 0) + 1
         log.info("run.queued", candidates=len(posts), queued=len(queue), limit=limit,
+                 excluded=excluded,
                  intern=by_tier.get(TIER_INTERN, 0), newgrad=by_tier.get(TIER_NEWGRAD, 0),
                  fulltime=by_tier.get(TIER_FULLTIME, 0), senior=by_tier.get(TIER_SENIOR, 0))
 

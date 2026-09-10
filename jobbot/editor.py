@@ -248,7 +248,8 @@ def from_form(data: dict[str, Any]) -> dict[str, Any]:
               "timeline_notes", "how_heard", "why_this_company_notes"):
         out[k] = str(data.get(k) or "").strip()
 
-    for k in ("target_titles", "target_locations", "target_companies", "awards",
+    for k in ("target_titles", "target_locations", "target_companies",
+              "exclude_companies", "awards",
               "publications", "certifications", "languages"):
         out[k] = clean_list(data.get(k))
 

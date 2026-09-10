@@ -248,6 +248,15 @@ class Profile(BaseModel):
     target_titles: list[str] = Field(default_factory=list)
     target_locations: list[str] = Field(default_factory=list)
     target_companies: list[str] = Field(default_factory=list)
+    # Companies never to queue: already applied by hand, current employer,
+    # anywhere the user does not want a second application landing. Matched
+    # case-insensitively against the posting's company field.
+    exclude_companies: list[str] = Field(default_factory=list)
+
+    def excludes(self, company: str) -> bool:
+        c = (company or "").strip().lower()
+        return any(c == x.strip().lower() or x.strip().lower() in c
+                   for x in self.exclude_companies if x.strip())
     remote_ok: bool = True
     onsite_ok: bool = True
     hybrid_ok: bool = True

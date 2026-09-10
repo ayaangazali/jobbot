@@ -297,3 +297,15 @@ def test_a_title_sharing_no_word_with_any_target_is_not_a_match() -> None:
                  title="Machine Learning Infrastructure Engineer", url="u", description=jd)
     assert fit_score(prof, ml) >= 0.9
     assert fit_score(prof, support) < 0.5, "identical description, unrelated title -> below threshold"
+
+
+def test_excluded_companies_are_never_queued() -> None:
+    """The user had already applied to Palantir by hand; the run picked it as
+    its top match anyway. There was no way to say "not this one"."""
+    from jobbot.profile import Profile
+
+    p = Profile.model_validate({"identity": {}, "exclude_companies": ["Palantir", "Example Corp"]})
+    assert p.excludes("palantir") and p.excludes("Palantir Technologies")
+    assert p.excludes("EXAMPLE CORP")
+    assert not p.excludes("Nuro") and not p.excludes("")
+    assert not Profile.model_validate({"identity": {}}).excludes("Palantir")
