@@ -18,6 +18,7 @@ commercial tool "supports Workday" while failing on most real postings.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -82,8 +83,120 @@ async def _text(page: Any, sel: str) -> str:
     return ""
 
 
+async def _live(page: Any, sel: str, timeout: int = 8000) -> Any:
+    """The match that is actually on screen, not the one buried under a modal.
+
+    Clicking Workday's "Sign In" opens a modal over the page, and from that
+    point there are two [data-automation-id="email"] elements. `.first` is the
+    one underneath -- covered, unclickable -- which is where "element is
+    covered by <DIV>" came from, and with it every Workday application in the
+    run. The modal mounts last, so search from the end.
+    """
+    loc = page.locator(sel)
+    await loc.first.wait_for(state="attached", timeout=timeout)
+    for i in range(await loc.count() - 1, -1, -1):
+        cand = loc.nth(i)
+        with contextlib.suppress(Exception):
+            if await cand.is_visible() and await cand.is_enabled():
+                return cand
+    return loc.first
+
+
+async def _submit(page: Any, sel: str, fallback_text: str) -> None:
+    """Press a submit button that a sticky footer keeps intercepting.
+
+    Workday's panel puts its submit under a fixed element, so the humanised
+    click refuses to press it: "element is covered by <DIV>". The element is
+    identified unambiguously by its automation id, so scroll to it and press
+    it directly rather than abandoning the application.
+    """
+    btn = await _live(page, sel)
+    with contextlib.suppress(Exception):
+        await btn.scroll_into_view_if_needed()
+        await page.wait_for_timeout(400)
+    try:
+        await btn.click(timeout=6000)
+        return
+    except Exception:  # noqa: BLE001
+        log.debug("workday.submit_intercepted", selector=sel)
+    with contextlib.suppress(Exception):
+        await btn.click(timeout=6000, force=True)
+        return
+    with contextlib.suppress(Exception):
+        await _click_first(page, [f"button:has-text('{fallback_text}')"])
+
+
+async def _fill_when_ready(page: Any, sel: str, value: str,
+                           timeout: int = 8000) -> None:
+    """Fill a field once it is actually there to be filled.
+
+    Workday re-renders the sign-in panel as it loads, so a locator resolved a
+    moment earlier detaches under us. Retrying once after the page settles
+    covers the re-render.
+    """
+    loc = await _live(page, sel, timeout)
+    try:
+        await loc.fill(value)
+    except Exception:  # noqa: BLE001
+        await cap.settle(page, quiet_ms=800)
+        loc = await _live(page, sel, timeout)
+        await loc.fill(value)
+
+
+async def _at_sign_in_gate(page: Any) -> bool:
+    """Is a sign-in still standing between us and the application?"""
+    for sel in (A["password"], A["signin_submit"]):
+        try:
+            if await page.locator(sel).first.is_visible(timeout=1500):
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
+async def _sign_in(page: Any, username: str, password: str) -> tuple[bool, str]:
+    """Sign in with credentials we hold. Returns (signed_in, error)."""
+    await cap.dismiss_overlays(page)
+    # Only reach for the sign-in link when the sign-in form is not already in
+    # front of us. Workday's first step IS "Create Account/Sign In", and
+    # clicking the header link there re-rendered the panel -- throwing a
+    # loading overlay across the very field we were about to fill, which is
+    # the "element is covered by <DIV>" that killed every Workday application.
+    on_create_form = False
+    with contextlib.suppress(Exception):
+        on_create_form = await page.locator(A["verify_password"]).first.is_visible(
+            timeout=1500)
+    email_here = False
+    with contextlib.suppress(Exception):
+        email_here = await page.locator(A["email"]).first.is_visible(timeout=1500)
+
+    if on_create_form or not email_here:
+        await _click_first(page, [A["sign_in_link"], "a:has-text('Sign In')"], timeout=4000)
+        await cap.settle(page, quiet_ms=800)
+    try:
+        await _fill_when_ready(page, A["email"], username)
+        await _fill_when_ready(page, A["password"], password)
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)[:200]
+    await cap.settle(page, quiet_ms=600)
+    await _submit(page, A["signin_submit"], "Sign In")
+    await cap.settle(page, quiet_ms=1500)
+
+    err = await _text(page, A["error"])
+    if err:
+        return False, err[:200]
+    if await _at_sign_in_gate(page):
+        # No error text, but we are demonstrably still outside. Saying
+        # signed_in=True here is what walked the run into a gated form.
+        return False, "sign-in did not take: still at the sign-in gate"
+    return True, ""
+
+
 async def start_application(page: Any) -> bool:
     """Click through from the posting to the application itself."""
+    # Before anything is clicked: the cookie banner overlays the controls, and
+    # a click through it fails rather than falling through to the element.
+    await cap.dismiss_overlays(page)
     if not await _click_first(page, [A["apply"], "button:has-text('Apply')",
                                      "a:has-text('Apply')"]):
         return False
@@ -127,31 +240,22 @@ async def ensure_account(
 
     if existing:
         log.info("workday.signing_in", tenant=tenant, username=existing.username)
-        await _click_first(page, [A["sign_in_link"], "a:has-text('Sign In')"], timeout=4000)
-        await cap.settle(page, quiet_ms=600)
-        try:
-            await page.locator(A["email"]).first.fill(existing.username)
-            await page.locator(A["password"]).first.fill(existing.password)
-            await _click_first(page, [A["signin_submit"], "button:has-text('Sign In')"])
-            await cap.settle(page, quiet_ms=1200)
-            err = await _text(page, A["error"])
-            if err:
-                return AccountResult(False, False, existing.username, error=err[:200])
-            return AccountResult(created=False, signed_in=True, username=existing.username)
-        except Exception as exc:  # noqa: BLE001
-            return AccountResult(False, False, existing.username, error=str(exc)[:200])
+        ok, err = await _sign_in(page, existing.username, existing.password)
+        return AccountResult(created=False, signed_in=ok,
+                             username=existing.username, error=err)
 
     # No account yet -- create one.
     password = vault.generate_password()
     log.info("workday.creating_account", tenant=tenant, username=email)
 
+    await cap.dismiss_overlays(page)
     await _click_first(page, [A["create_account_link"], "a:has-text('Create Account')",
                               "button:has-text('Create Account')"], timeout=6000)
     await cap.settle(page, quiet_ms=800)
 
     try:
-        await page.locator(A["email"]).first.fill(email)
-        await page.locator(A["password"]).first.fill(password)
+        await _fill_when_ready(page, A["email"], email)
+        await _fill_when_ready(page, A["password"], password)
         vp = page.locator(A["verify_password"]).first
         if await vp.count():
             await vp.fill(password)
@@ -169,7 +273,7 @@ async def ensure_account(
 
         # Capture the clock BEFORE submitting so a stale code cannot be accepted.
         sent_at = time.time()
-        await _click_first(page, [A["create_submit"], "button:has-text('Create Account')"])
+        await _submit(page, A["create_submit"], "Create Account")
         await cap.settle(page, quiet_ms=1500)
 
         err = await _text(page, A["error"])
@@ -212,6 +316,18 @@ async def ensure_account(
                                       "button:has-text('Verify')"])
             await cap.settle(page, quiet_ms=1200)
             log.info("workday.email_verified", tenant=tenant)
+
+        # Creating an account does not always leave you inside it. Blue Origin
+        # accepted the account, saved the credential, and returned us to the
+        # sign-in page -- and because this reported signed_in=True regardless,
+        # the run walked into a gated form and gave up at "still gated behind
+        # sign-in". Check, and sign in with what we just created if not.
+        if await _at_sign_in_gate(page):
+            log.info("workday.signing_in_after_create", tenant=tenant)
+            ok, err = await _sign_in(page, email, password)
+            if not ok:
+                return AccountResult(True, False, email,
+                                     needed_email_code=needed_code, error=err)
 
         return AccountResult(created=True, signed_in=True, username=email,
                              needed_email_code=needed_code)
