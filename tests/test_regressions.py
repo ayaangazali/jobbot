@@ -451,3 +451,23 @@ def test_every_module_imports_what_it_uses() -> None:
             if name not in imported:
                 problems.append(f"{path}: uses {name}. without importing it")
     assert not problems, "\n".join(problems)
+
+
+def test_no_does_not_tick_a_checkbox() -> None:
+    """bool("No") is True, and that ticked every box in a choice group.
+
+    On HP IQ's "How did you hear about HP IQ?" the model answered the options
+    it did not mean with the string "No", and all seven were selected --
+    ColorStack, hackthehood, A friend, TEDTalk and the rest. The verifier
+    called it correctly: claiming a source the candidate did not come from is a
+    false statement to an employer.
+    """
+    from jobbot.forms.fill import _as_bool
+
+    for falsey in ("No", "no", "NO", "false", "0", "unchecked", "N/A", "", None, False):
+        assert _as_bool(falsey) is False, falsey
+    for truthy in ("Yes", "yes", "true", "1", "I agree", "confirmed", True):
+        assert _as_bool(truthy) is True, truthy
+    # Anything we cannot read is left alone rather than guessed either way.
+    assert _as_bool("maybe") is None
+    assert _as_bool("it depends") is None

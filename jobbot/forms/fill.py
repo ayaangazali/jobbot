@@ -807,6 +807,30 @@ async def fill_date(page: Any, field: FormField, value: str) -> bool:
     return ok
 
 
+_TRUEISH = {"yes", "y", "true", "1", "on", "checked", "agree", "agreed",
+            "i agree", "i consent", "accept", "confirm", "confirmed"}
+_FALSEISH = {"no", "n", "false", "0", "off", "unchecked", "none", "n/a",
+             "decline", "disagree", "not applicable", ""}
+
+
+def _as_bool(v: object) -> bool | None:
+    """Read a checkbox answer. None means "unclear -- do not touch it".
+
+    bool() is the wrong tool: bool("No") is True, and that ticked every box in
+    a multi-choice group whose unwanted options were answered "No".
+    """
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return False
+    text = str(v).strip().lower()
+    if text in _TRUEISH:
+        return True
+    if text in _FALSEISH:
+        return False
+    return None
+
+
 async def fill_checkbox(page: Any, field: FormField, value: bool) -> bool:
     loc = await _locate(page, field)
     await loc.scroll_into_view_if_needed()
@@ -1019,7 +1043,17 @@ async def apply_answer(
             return await fill_radio(page, field, v)
 
         if field.kind in (FieldKind.CHECKBOX, FieldKind.CONSENT):
-            return await fill_checkbox(page, field, bool(v))
+            # bool("No") is True. On HP IQ's "How did you hear about us?"
+            # checkbox group the model answered every option it did not mean
+            # with the string "No", and every one of them got ticked -- the
+            # verifier called it what it was: "selecting a source the candidate
+            # did not actually come from is a false statement to the employer".
+            want = _as_bool(v)
+            if want is None:
+                log.warning("fill.checkbox_unclear", label=field.label[:50],
+                            value=str(v)[:40])
+                return False
+            return await fill_checkbox(page, field, want)
 
         if field.kind is FieldKind.DATE:
             return await fill_date(page, field, str(v))
