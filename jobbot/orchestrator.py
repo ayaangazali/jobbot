@@ -519,6 +519,12 @@ class Orchestrator:
             await wd.start_application(page)
         form, pc2 = await ck.checkpoint_parse(page, self.llm, shots)
 
+        # Read every option list before composing a single answer: a control
+        # that hides its choices behind a click made every stage downstream
+        # guess, and the guesses were wrong in ways no log could explain.
+        from jobbot.forms.fill import discover_options
+        await discover_options(page, form)
+
         # --- answers ------------------------------------------------------
         det_answers, leftover = deterministic_answers(
             self.profile, form,

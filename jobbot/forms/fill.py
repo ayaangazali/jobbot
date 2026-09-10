@@ -894,6 +894,54 @@ _BLOCK_BUTTON_JS = r"""
 """
 
 
+
+async def discover_options(page: Any, form: Any, *, limit: int = 14) -> int:
+    """Open each option list once, before anything is answered.
+
+    Most of this file's history is answers composed without knowing what a
+    control offered: "Yes" for a list of three sentences, today's date for a
+    list of month-year labels, "Company website / Careers page" for a list that
+    ran Grace Hopper, career fair, word of mouth, social media, LinkedIn,
+    Google. The options exist -- they are just behind a click, so the parse
+    could not see them and every later stage guessed.
+
+    Reading them up front costs a second per control and makes the first
+    answer an informed one.
+    """
+    found = 0
+    for field in form.fields:
+        if found >= limit:
+            break
+        if field.kind not in (FieldKind.COMBOBOX, FieldKind.SELECT):
+            continue
+        if field.options or not field.selector:
+            continue
+        try:
+            loc = page.locator(field.selector).first
+            if not await loc.count():
+                continue
+            await _close_open_menus(page)
+            await loc.scroll_into_view_if_needed()
+            await loc.fill("")            # focus opens the menu
+            await asyncio.sleep(0.45)
+            opts = await _own_options(page, field)
+            if opts:
+                from jobbot.forms.model import FieldOption
+                field.options = [FieldOption(label=o) for o in opts[:40]]
+                found += 1
+                log.debug("discover.options", label=field.label[:40], count=len(opts))
+        except Exception as exc:  # noqa: BLE001
+            log.debug("discover.options_failed", label=field.label[:40],
+                      error=str(exc)[:80])
+        finally:
+            with contextlib.suppress(Exception):
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.15)
+    await _close_open_menus(page)
+    if found:
+        log.info("discover.options_done", fields=found)
+    return found
+
 AUTOCOMPLETE_HINTS = ("location", "city", "address", "school", "university",
                       "country", "state", "region", "company")
 
