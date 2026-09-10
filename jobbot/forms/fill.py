@@ -273,14 +273,43 @@ _CONTROL_TEXT_JS = r"""
 """
 
 
+# An open menu is a container, not a count of options. Deciding by option
+# count meant a menu showing "No options" -- which is what ours looked like
+# after typing had filtered it -- counted as closed, so it was never dismissed
+# and it covered the next field: "element is covered by <DIV>", and that field
+# could not even be cleared, let alone answered.
+_MENU_OPEN_JS = r"""
+() => {
+  const vis = e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  for (const e of document.querySelectorAll('[aria-expanded="true"]')) if (vis(e)) return true;
+  for (const m of document.querySelectorAll(
+      '.select__menu, .select__menu-list, [role="listbox"], [class*="menu-list"]'))
+    if (vis(m)) return true;
+  return false;
+}
+"""
+
+
+async def _menu_is_open(page: Any) -> bool:
+    with contextlib.suppress(Exception):
+        return bool(await page.evaluate(_MENU_OPEN_JS))
+    return False
+
+
 async def _close_open_menus(page: Any, tries: int = 3) -> None:
-    """Dismiss any open listbox so option discovery starts from a clean slate."""
+    """Dismiss any open listbox so the next field is reachable."""
     for _ in range(tries):
-        if not await _visible_options(page):
+        if not await _menu_is_open(page):
             return
         with contextlib.suppress(Exception):
             await page.keyboard.press("Escape")
-        await asyncio.sleep(0.2)
+            await asyncio.sleep(0.2)
+        if not await _menu_is_open(page):
+            return
+        with contextlib.suppress(Exception):
+            # Escape is ignored by some widgets; losing focus is not.
+            await page.evaluate("() => document.activeElement && document.activeElement.blur()")
+            await asyncio.sleep(0.2)
     with contextlib.suppress(Exception):
         await page.mouse.click(4, 4)     # click away as a last resort
         await asyncio.sleep(0.25)

@@ -598,13 +598,40 @@ class Orchestrator:
 
         by_id = {f.field_id: f for f in form.fields}
         filled = 0
+        failed: list[FormField] = []
         for a in answers:
             f = by_id.get(a.field_id)
             if f is None or not a.submittable:
                 continue
             if await apply_answer(page, f, a, resume_path=resume_pdf):
                 filled += 1
+            else:
+                failed.append(f)
         log.info("apply.filled", job_id=jid, filled=filled, total=len(form.fields))
+
+        # A dropdown's options often exist only once it is open, so the first
+        # answer was composed without them: "Yes" for a list of sentences,
+        # today's date for a list of month-year choices. Filling records what
+        # the control actually offered, so anything that failed and now has
+        # options is worth one more answer -- this time with the list in hand.
+        blind = [f for f in failed if f.options and f.required]
+        if blind:
+            log.info("apply.reanswer_with_options", count=len(blind),
+                     labels=[f.label[:40] for f in blind])
+            second = await asyncio.to_thread(
+                model_answers, self.llm, self.profile, blind,
+                job_context=(f"{post.title} at {post.company}\n\n"
+                             f"{post.description[:3000]}\n\n"
+                             "Each field below now lists the exact options the "
+                             "control offers. Choose one of them verbatim."),
+                images=pc2.tiles, aria=pc2.aria)
+            for a in second:
+                f = by_id.get(a.field_id)
+                if f is not None and a.submittable and await apply_answer(
+                        page, f, a, resume_path=resume_pdf):
+                    filled += 1
+                    answers = [x for x in answers if x.field_id != a.field_id] + [a]
+            log.info("apply.filled_after_reanswer", job_id=jid, filled=filled)
 
         def dump_answers() -> None:
             (audit / "answers.json").write_text(json.dumps([
