@@ -259,11 +259,25 @@ _VALIDITY_JS = r"""
   try { el = document.querySelector(sel); } catch (e) { return null; }
   if (!el) return null;
   const aria = el.getAttribute('aria-invalid');
-  const native = (typeof el.checkValidity === 'function') ? !el.checkValidity() : false;
+  let native = (typeof el.checkValidity === 'function') ? !el.checkValidity() : false;
+
+  // A required checkbox group: Greenhouse marks a "pick at least one" question
+  // by putting `required` on every box, and the browser applies that per
+  // element -- so each box the candidate did not tick reports invalid with
+  // "Please check this box if you want to proceed". Reading that literally
+  // said seven of HP IQ's eight sources were errors, and the only way to
+  // clear them would be to claim every one of them. One tick answers the
+  // question; the siblings are not errors.
+  if (native && el.type === 'checkbox' && !el.checked && el.name) {
+    const group = [...document.querySelectorAll(
+      'input[type="checkbox"][name="' + el.name.replace(/"/g, '\\"') + '"]')];
+    if (group.length > 1 && group.some(c => c.checked)) native = false;
+  }
+
   return {
     sel,
     invalid: aria === 'true' || native,
-    message: el.validationMessage || '',
+    message: native ? (el.validationMessage || '') : '',
     value_len: (el.value || '').length,
   };
 }).filter(Boolean)
