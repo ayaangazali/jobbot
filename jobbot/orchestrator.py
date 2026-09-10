@@ -496,7 +496,7 @@ class Orchestrator:
                 continue
             if any(a.field_id == f.field_id for a in answers):
                 continue
-            if re.search(r"cover\s*letter|transcript|portfolio",
+            if re.search(r"cover[\s_-]*letter|transcript|portfolio",
                          f"{f.label} {f.field_id}", re.I):
                 # Not a resume slot. Leave it empty rather than upload the
                 # wrong document under a heading the reviewer will read.
