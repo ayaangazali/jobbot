@@ -410,6 +410,12 @@ def model_answers(
     by_id = {f.field_id: f for f in fields}
     out: list[ProposedAnswer] = []
     for a in data.get("answers", []):
+        if not isinstance(a, dict):
+            # Forced tool use does not guarantee the shape inside an array. One
+            # run came back with bare strings here and the whole application
+            # crashed after the resume was already tailored and rendered.
+            log.warning("answer.malformed_item", got=str(a)[:80])
+            continue
         fid = a.get("field_id", "")
         f = by_id.get(fid)
         if f is None:
