@@ -41,6 +41,7 @@ import structlog
 from jobbot.forms.matching import (
     is_decline, match_acknowledgement, match_boolean, match_decline,
     match_numeric_range, match_option,
+    fold_accents,
 )
 from jobbot.forms.model import FieldKind, FormField, ProposedAnswer
 
@@ -294,7 +295,9 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
             # Type the head of the value: a location autocomplete wants "San
             # Jose", then offers the full "San Jose, California, United States"
             # for the matcher to pick exactly.
-            await loc.press_sequentially(text.split(",")[0][:32],
+            # Type without accents: the search index behind these pickers is
+            # plain ASCII, and "José" returns nothing where "Jose" matches.
+            await loc.press_sequentially(fold_accents(text.split(",")[0])[:32],
                                          delay=random.randint(35, 75))
         # A school or location picker queries a server on each keystroke, and
         # a fixed wait raced it: the menu was still empty when we looked, so a

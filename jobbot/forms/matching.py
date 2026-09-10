@@ -24,12 +24,22 @@ _WS = re.compile(r"\s+")
 _STOP = {"a", "an", "the", "of", "or", "and", "in", "to", "degree", "s"}
 
 
+def fold_accents(s: str) -> str:
+    """Drop combining marks, keep everything else.
+
+    Greenhouse's school search returns nothing for "San José State University"
+    and the right answer for "San Jose State University", so this is needed for
+    what gets typed as well as for what gets compared.
+    """
+    return "".join(c for c in unicodedata.normalize("NFKD", s or "")
+                   if not unicodedata.combining(c))
+
+
 def normalize(s: str) -> str:
-    # Strip accents: the profile says "San José State University" and the
-    # school picker lists "San Jose State University". Comparing those two as
-    # different strings left a required field empty.
-    s = unicodedata.normalize("NFKD", s or "")
-    s = "".join(c for c in s if not unicodedata.combining(c))
+    # The profile says "San José State University" and the picker lists
+    # "San Jose State University"; comparing those as different strings left a
+    # required field empty.
+    s = fold_accents(s)
     s = s.lower().replace("’", "'").replace("‘", "'")
     s = s.replace("'", "")
     s = _PUNCT.sub(" ", s)
