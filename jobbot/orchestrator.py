@@ -52,7 +52,7 @@ from jobbot.healer.answer import deterministic_answers, model_answers
 from jobbot.llm.client import LLMClient
 from jobbot.notify import Notification, reliability_score
 from jobbot.notify import send as notify_send
-from jobbot.profile import Profile
+from jobbot.profile import LEGALLY_SIGNIFICANT, Profile
 from jobbot.resume.render import render_one_page
 from jobbot.resume.tailor import fabrication_check, refine, sanitize_skills, tailor
 from jobbot.tracker.answers_csv import AnswerLog
@@ -652,15 +652,29 @@ class Orchestrator:
         if not verification.ready_to_submit or verification.blockers:
             self.tracker.update(jid, status=Status.NEEDS_HUMAN.value,
                                 error=f"{len(verification.blockers)} unresolved blockers")
-            if self.cfg.persist_until_submitted:
+            (audit / "blockers.txt").write_text(
+                "\n".join(f"{i.label}: {i.problem}" for i in verification.blockers))
+            # A question only the candidate can answer is not something to sit
+            # in front of. Waiting on one halts every other application behind
+            # it, and no amount of retrying will produce a legal attestation
+            # nobody has given us. Record it, move on, come back when it is
+            # answered. Anything else keeps its tab.
+            by_id = {f.field_id: f for f in form.fields}
+            needs_candidate = all(
+                (by_id.get(i.field_id) is not None
+                 and by_id[i.field_id].profile_key in LEGALLY_SIGNIFICANT
+                 and not self.profile.can_answer(by_id[i.field_id].profile_key))
+                for i in verification.blockers)
+            if self.cfg.persist_until_submitted and not needs_candidate:
                 # Leave it exactly as it stands: the form filled, the tab open,
                 # the page live. Closing it would discard the work and the next
                 # attempt would start from an empty form.
                 log.error("apply.halted_open", job_id=jid,
                           blockers=[i.label[:60] for i in verification.blockers])
-                (audit / "blockers.txt").write_text(
-                    "\n".join(f"{i.label}: {i.problem}" for i in verification.blockers))
                 raise HaltWithTabOpen(jid, verification.blockers)
+            if needs_candidate:
+                log.warning("apply.awaiting_candidate", job_id=jid,
+                            questions=[i.label[:60] for i in verification.blockers])
             return ApplicationResult(jid, Status.NEEDS_HUMAN.value,
                                      "verification not clean", heal_rounds=rounds,
                                      flagged=[i.problem for i in verification.blockers],
