@@ -533,6 +533,15 @@ async def fill_date(page: Any, field: FormField, value: str) -> bool:
     await loc.fill("")
     await loc.press_sequentially(text, delay=random.randint(30, 70))
     await asyncio.sleep(0.4)
+
+    # Close the calendar. Typing into a picker leaves its overlay open, and it
+    # covers whatever sits below -- on one form that was both work-authorisation
+    # questions and a required essay, all three reported empty because nothing
+    # could reach them. Escape dismisses the calendar and keeps the typed value.
+    with contextlib.suppress(Exception):
+        await page.keyboard.press("Escape")
+        await asyncio.sleep(0.25)
+
     got = (await loc.input_value() or "").strip()
     ok = bool(m) and m.group(3) in got and m.group(1) in got
     if not ok:
