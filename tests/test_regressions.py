@@ -237,3 +237,63 @@ def test_the_verifier_is_told_the_pages_own_validity_state() -> None:
     assert "Are you open to relocation?: Please select an item" in one_bad
 
     assert _validity_block(form, {}) == "", "no signal, no claim"
+
+
+def test_a_richer_profile_does_not_score_lower_on_the_same_job() -> None:
+    """The skill bar scaled with profile size: 69 skills needed 24 hits.
+
+    A real 69-skill profile scored 0.35-0.40 on every one of 598 postings and
+    the run attempted nothing. Same job, same matching skills, fewer listed
+    skills -> higher score is the wrong way round.
+    """
+    from jobbot.ats.detect import ATS
+    from jobbot.discovery.sources import JobPost
+    from jobbot.orchestrator import fit_score
+    from jobbot.profile import Profile
+
+    jd = "We want Python, Go, PostgreSQL, Docker, Kubernetes, Redis, Kafka and Linux."
+    post = JobPost(ats=ATS.GREENHOUSE, native_id="1", company="C",
+                   title="Software Engineer", url="u", description=jd)
+    core = ["Python", "Go", "PostgreSQL", "Docker", "Kubernetes", "Redis", "Kafka", "Linux"]
+    lean = Profile.model_validate({"identity": {}, "target_titles": ["Software Engineer"],
+                                   "skills": {"Core": core}})
+    rich = Profile.model_validate({"identity": {}, "target_titles": ["Software Engineer"],
+                                   "skills": {"Core": core, "Also": [f"skill{i}" for i in range(60)]}})
+    assert fit_score(rich, post) == fit_score(lean, post), \
+        "listing more skills must not lower the score for the same matching set"
+    assert fit_score(rich, post) >= 0.9
+
+
+def test_title_match_survives_word_order_and_a_level_suffix() -> None:
+    """"Machine Learning Engineer Intern" describes "Machine Learning
+    Infrastructure Engineer"; a substring test said it did not, and every title
+    on a 598-posting board scored the no-match floor."""
+    from jobbot.orchestrator import _title_match
+
+    targets = ["Machine Learning Engineer Intern", "Software Engineering Intern"]
+    assert _title_match(targets, "Machine Learning Infrastructure Engineer")[0] == 1.0
+    assert _title_match(targets, "Senior Software Security Engineer")[1] == 1.0, \
+        "'engineering' must meet 'engineer'"
+    assert _title_match(targets, "Product Support Specialist") == (0.45, 0.0), \
+        "no shared word: floor, and flagged as such"
+    partial = _title_match(targets, "Research Engineer, Discovery")
+    assert 0.45 < partial[0] < 1.0
+
+
+def test_a_title_sharing_no_word_with_any_target_is_not_a_match() -> None:
+    """A description mentioning Python and Linux is not enough on its own."""
+    from jobbot.ats.detect import ATS
+    from jobbot.discovery.sources import JobPost
+    from jobbot.orchestrator import fit_score
+    from jobbot.profile import Profile
+
+    prof = Profile.model_validate({"identity": {},
+        "target_titles": ["Machine Learning Engineer Intern"],
+        "skills": {"x": ["Python", "Linux", "Git", "SQL", "Docker", "Bash", "Jira", "Slack"]}})
+    jd = "Python Linux Git SQL Docker Bash Jira Slack -- help customers."
+    support = JobPost(ats=ATS.GREENHOUSE, native_id="1", company="C",
+                      title="Product Support Specialist", url="u", description=jd)
+    ml = JobPost(ats=ATS.GREENHOUSE, native_id="2", company="C",
+                 title="Machine Learning Infrastructure Engineer", url="u", description=jd)
+    assert fit_score(prof, ml) >= 0.9
+    assert fit_score(prof, support) < 0.5, "identical description, unrelated title -> below threshold"

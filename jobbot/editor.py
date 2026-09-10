@@ -20,6 +20,7 @@ Two rules the UI enforces, because they are the point of the project:
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -155,6 +156,24 @@ def _no_placeholder(v: Any) -> str:
     return "" if s.lower() in _PLACEHOLDERS else s
 
 
+def first_number(v: Any) -> float | None:
+    """The first number in a human-written value, or None.
+
+    People write a GPA as "3.8/4.0", "3.8 out of 4.0", "GPA: 3.8" or "3.8" --
+    all of them normal, none of them float()-able except the last. A bare
+    float() raised ValueError straight out of the save, and because one
+    exception fails the whole request, a single slash discarded every role and
+    project in the submission.
+    """
+    text = str(v or "")
+    # A decimal comma between single digits is a European decimal point, not a
+    # thousands separator: "3,8" is 3.8, and reading it as 3.0 would put a
+    # wrong GPA on a resume rather than no GPA.
+    text = re.sub(r"(?<=\d),(?=\d\b)", ".", text)
+    m = re.search(r"\d+(?:\.\d+)?", text)
+    return float(m.group()) if m else None
+
+
 def _url(s: str) -> str:
     """Add a scheme to a bare domain.
 
@@ -248,8 +267,10 @@ def from_form(data: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         out["min_requirement_match"] = 0.5
 
-    npw = str(data.get("notice_period_weeks") or "").strip()
-    out["notice_period_weeks"] = int(float(npw)) if npw else None
+    # "2", "2 weeks", "two weeks" -> 2, 2, None. Same reason as the GPA: an
+    # int(float(...)) here took the whole save down with it.
+    npw = first_number(data.get("notice_period_weeks"))
+    out["notice_period_weeks"] = int(npw) if npw is not None else None
 
     exp = []
     for e in data.get("experience") or []:
@@ -274,14 +295,13 @@ def from_form(data: dict[str, Any]) -> dict[str, Any]:
     for x in data.get("education") or []:
         if not str(x.get("school") or "").strip():
             continue
-        gpa = str(x.get("gpa") or "").strip()
         edu.append({
             "school": x["school"].strip(),
             "degree": str(x.get("degree") or "").strip(),
             "field_of_study": str(x.get("field_of_study") or "").strip(),
             "start": str(x.get("start") or "").strip() or None,
             "end": str(x.get("end") or "").strip() or None,
-            "gpa": float(gpa) if gpa else None,
+            "gpa": first_number(x.get("gpa")),
             "completed": bool(x.get("completed")),
         })
     out["education"] = edu
@@ -324,11 +344,16 @@ def from_form(data: dict[str, Any]) -> dict[str, Any]:
 
     comp = data.get("compensation") or {}
     def money(v: Any) -> int | None:
-        s = str(v or "").replace(",", "").replace("$", "").strip()
-        try:
-            return int(float(s)) if s else None
-        except ValueError:
+        """Salary as people write it: "$165,000", "165k", "165K", "competitive"."""
+        raw = str(v or "").replace(",", "").replace("$", "").strip()
+        n = first_number(raw)
+        if n is None:
             return None
+        if re.search(r"\d\s*[kK]\b", raw):
+            n *= 1_000
+        elif re.search(r"\d\s*[mM]\b", raw):
+            n *= 1_000_000
+        return int(n)
     out["compensation"] = {
         "target_base": money(comp.get("target_base")),
         "minimum_base": money(comp.get("minimum_base")),

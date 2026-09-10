@@ -116,6 +116,51 @@ def role_tier(post: JobPost) -> int:
     return TIER_FULLTIME
 
 
+# Words that say nothing about WHAT the job is: level, schedule, punctuation.
+_TITLE_NOISE = {"intern", "internship", "co", "op", "coop", "summer", "winter", "fall",
+                "spring", "the", "of", "and", "or", "a", "an", "in", "for", "to",
+                "i", "ii", "iii", "iv", "new", "grad", "graduate", "junior", "senior",
+                "sr", "staff", "lead", "principal", "level", "entry"}
+
+
+def _title_tokens(title: str) -> set[str]:
+    out = set()
+    for w in re.findall(r"[a-z][a-z+#.]*", title.lower()):
+        w = w.rstrip(".")
+        if w in _TITLE_NOISE or len(w) < 2:
+            continue
+        # crude stem so "engineering" meets "engineer" and "systems" meets "system"
+        for suf in ("ing", "s"):
+            if len(w) > 5 and w.endswith(suf):
+                w = w[: -len(suf)]
+                break
+        out.add(w)
+    return out
+
+
+def _title_match(targets: list[str], title: str) -> tuple[float, float]:
+    """Best word-overlap between the posting title and any target title.
+
+    A substring test could not see that "Machine Learning Engineer Intern"
+    describes "Machine Learning Infrastructure Engineer": word order differs
+    and the level suffix is not in the posting. Every title therefore scored
+    the no-match floor and the whole board fell under the threshold. Returns
+    (score, overlap) so the caller can also tell "no shared word at all".
+    """
+    posting = _title_tokens(title)
+    if not posting:
+        return 0.45, 0.0
+    best = 0.0
+    for t in targets:
+        want = _title_tokens(t)
+        if not want:
+            continue
+        if t in title.lower():
+            return 1.0, 1.0
+        best = max(best, len(want & posting) / len(want))
+    return round(0.45 + 0.55 * best, 3), best
+
+
 def fit_score(profile: Profile, post: JobPost) -> float:
     """Cheap lexical fit, used only to rank and to filter obvious mismatches.
 
@@ -129,14 +174,20 @@ def fit_score(profile: Profile, post: JobPost) -> float:
         return 0.5
 
     titles = [t.lower() for t in profile.target_titles]
-    title_score = 1.0 if any(t in post.title.lower() for t in titles) else 0.45
-    if not titles:
-        title_score = 0.6
+    if titles:
+        title_score, overlap = _title_match(titles, post.title)
+    else:
+        title_score, overlap = 0.6, 1.0
 
     if post.description.strip():
         skills = [s.lower() for items in profile.skills.values() for s in items]
         hits = sum(1 for s in skills if s and s in text)
-        skill_score = min(1.0, hits / max(6, len(skills) * 0.35)) if skills else 0.5
+        # The bar for "full skill match" is a property of the posting, not of
+        # how thorough the candidate was. Scaling it with the profile's size
+        # meant a 69-skill profile needed 24 hits in one description where an
+        # 11-skill profile needed 6 -- the richer profile scored lower on the
+        # same job, and every posting on a board came in under the threshold.
+        skill_score = min(1.0, hits / min(max(6, len(skills) * 0.35), 8)) if skills else 0.5
         score = 0.6 * skill_score + 0.4 * title_score
     else:
         # Workday's search API returns postings with no description body. Scoring
@@ -145,6 +196,13 @@ def fit_score(profile: Profile, post: JobPost) -> float:
         # ATS that accounts for most of the real apply volume. Score on the title
         # alone instead of penalising the posting for data the source never sent.
         score = title_score
+
+    # A posting whose title shares no word at all with any target is almost
+    # never what the candidate meant. Without this, a support role whose
+    # description happened to mention Python and Linux scored the same as the
+    # ML infrastructure job next to it.
+    if titles and overlap == 0.0:
+        score *= 0.6
 
     # Seniority sanity. Applying to Staff and Principal roles with under two
     # years of experience is the undirected-volume case the evidence says has

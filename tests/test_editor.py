@@ -208,3 +208,53 @@ def test_an_absent_boolean_keeps_the_model_default() -> None:
         "hybrid_ok": True, "willing_to_relocate": True}))
     assert (stated.remote_ok, stated.onsite_ok) == (True, False)
     assert stated.willing_to_relocate is True, "an explicit choice still wins"
+
+
+def test_a_gpa_written_the_way_people_write_it() -> None:
+    """"3.8/4.0" is how a GPA appears on most resumes.
+
+    float("3.8/4.0") raised ValueError out of the save, and one exception fails
+    the whole request -- so a single slash discarded a submission carrying ten
+    roles and eight projects.
+    """
+    from jobbot.editor import first_number
+
+    assert first_number("3.8/4.0") == 3.8
+    assert first_number("3.8 out of 4.0") == 3.8
+    assert first_number("GPA 3.8") == 3.8
+    assert first_number("3,8") == 3.8, "a decimal comma is a decimal point, not 3.0"
+    assert first_number("A-") is None, "unparseable means absent, never a guess"
+    assert first_number("") is None and first_number(None) is None
+
+    out = from_form({**BASE,
+                     "education": [{"school": "X", "gpa": "3.8/4.0"}],
+                     "notice_period_weeks": "2 weeks"})
+    assert out["education"][0]["gpa"] == 3.8
+    assert out["notice_period_weeks"] == 2
+
+
+def test_no_unparseable_field_can_abort_a_save(tmp_path) -> None:
+    """Every numeric field takes free text without raising."""
+    res = save(tmp_path / "p.yaml", from_form({
+        **BASE,
+        "education": [{"school": "X", "gpa": "first class honours"}],
+        "notice_period_weeks": "immediately",
+        "min_requirement_match": "half",
+        "compensation": {"target_base": "competitive", "minimum_base": "$140,000"},
+    }))
+    assert res["ok"], res
+    prof = yaml.safe_load((tmp_path / "p.yaml").read_text())
+    assert prof["education"][0]["gpa"] is None
+    assert prof["notice_period_weeks"] is None
+    assert prof["min_requirement_match"] == 0.5
+    assert prof["compensation"]["minimum_base"] == 140000
+
+
+def test_salary_shorthand() -> None:
+    """"165k" is how a target base gets typed, and it parsed to nothing."""
+    def comp(t, m):
+        return from_form({**BASE, "compensation": {"target_base": t, "minimum_base": m}})["compensation"]
+
+    assert comp("165k", "140k") == {"target_base": 165000, "minimum_base": 140000, "currency": "USD"}
+    assert comp("$165,000", "140000")["target_base"] == 165000
+    assert comp("1.2m", "competitive") == {"target_base": 1200000, "minimum_base": None, "currency": "USD"}
