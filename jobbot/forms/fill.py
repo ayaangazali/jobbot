@@ -200,6 +200,17 @@ async def fill_text(page: Any, field: FormField, value: str, *, sequential: bool
 
 async def fill_select(page: Any, field: FormField, value: str) -> bool:
     """Native <select>. Snap to a real option; never inject free text."""
+    # Dispatch on the element, not on what the parse called it. HP IQ's "How
+    # did you hear about HP IQ?" was read as a multiselect, so select_option
+    # was called on a custom widget: "Element is not a <select> element", and a
+    # required field went unanswered over a mislabelled kind.
+    with contextlib.suppress(Exception):
+        loc = await _locate(page, field)
+        tag = (await loc.evaluate("e => e.tagName") or "").lower()
+        if tag != "select":
+            log.debug("fill.select_is_not_native", label=field.label[:40], tag=tag)
+            return await fill_combobox(page, field, str(value))
+
     opts = field.option_labels()
     ack = match_acknowledgement(value, opts)
     if ack is not None:
