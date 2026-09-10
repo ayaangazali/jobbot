@@ -43,6 +43,8 @@ async def _collect(sources: list[str], limit_per: int) -> list[JobPost]:
             elif kind == "workday":
                 tenant, site, pod = (rest.split("/") + ["wd1"])[:3]
                 posts += await d.workday(tenant, site, pod, max_jobs=limit_per)
+            elif kind == "interns":
+                posts += await d.intern_list(rest or "simplify")
             elif kind == "linkedin":
                 # Aggregator rows carry no apply endpoint, so resolve each one to
                 # the company's own board before it reaches the queue. The

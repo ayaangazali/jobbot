@@ -23,7 +23,7 @@ from typing import Any, Iterable
 import httpx
 import structlog
 
-from jobbot.ats.detect import ATS
+from jobbot.ats.detect import ATS, detect
 
 log = structlog.get_logger(__name__)
 
@@ -35,6 +35,19 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 # path that returns zero jobs and looks like "no results today".
 RETRYABLE = {408, 429, 500, 502, 503, 504}
 HARD_BLOCK = {401, 403, 406}
+
+
+# The Simplify file mixes in quant, hardware and PM listings under the same
+# schema; only these are worth queueing for a software candidate.
+_INTERN_CATEGORIES = {"Software", "Software Engineering", "AI/ML", "Data Science",
+                      "Quant", "Hardware", "Other"}
+
+
+def _from_epoch(v: Any) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(float(v), tz=timezone.utc)
+    except (TypeError, ValueError, OSError):
+        return None
 
 
 class SourceBlocked(RuntimeError):
@@ -162,6 +175,66 @@ class Discovery:
                 posted_at=_parse_dt(j.get("updated_at") or j.get("first_published")),
                 raw=j,
             ))
+        return out
+
+    # -- community internship lists ---------------------------------------
+
+    # Two GitHub repos maintain a curated list of new internship postings and
+    # publish it as JSON beside the README. They are aggregators of the same
+    # ATS boards we already read, but they surface companies whose board slug
+    # we would never guess, and they carry a posting date we can filter on.
+    INTERN_LISTS = {
+        "simplify": "https://raw.githubusercontent.com/SimplifyJobs/"
+                    "Summer2027-Internships/dev/.github/scripts/listings.json",
+        "vansh": "https://raw.githubusercontent.com/vanshb03/"
+                 "Summer2027-Internships/dev/.github/scripts/listings.json",
+    }
+
+    async def intern_list(self, which: str, *, max_age_days: int = 120) -> list[JobPost]:
+        """Postings from a community-maintained internship list.
+
+        Closed and hidden rows are dropped here rather than downstream: the
+        Simplify file carries every listing it has ever published, and roughly
+        four in five are inactive. Each row's apply URL points at the company's
+        own ATS, so the rest of the pipeline treats these exactly like a board
+        posting -- there is no aggregator apply flow to fall back to.
+        """
+        url = self.INTERN_LISTS.get(which)
+        if url is None:
+            raise ValueError(f"unknown internship list {which!r}; "
+                             f"try one of {sorted(self.INTERN_LISTS)}")
+        async with httpx.AsyncClient(headers={"User-Agent": UA},
+                                     follow_redirects=True) as c:
+            data = await self._get(c, url)
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+        out = []
+        for j in data:
+            if not j.get("active") or not j.get("is_visible", True):
+                continue
+            if (j.get("category") or "Software") not in _INTERN_CATEGORIES:
+                continue
+            link = j.get("url") or ""
+            if not link:
+                continue
+            posted = _from_epoch(j.get("date_posted") or j.get("date_updated"))
+            if posted and posted < cutoff:
+                continue
+            det = detect(link)
+            locs = j.get("locations") or []
+            loc = ", ".join(locs[:2])
+            out.append(JobPost(
+                # The apply URL decides the ATS; the list is only how we found
+                # it. An unrecognised host stays UNKNOWN and the orchestrator
+                # decides what to do with it.
+                ats=det.ats,
+                native_id=det.native_id or str(j.get("id", ""))[:36],
+                company=j.get("company_name", ""),
+                title=j.get("title", ""), url=link, location=loc,
+                remote=_is_remote(f"{loc} {j.get('title', '')}"),
+                posted_at=posted, raw=j,
+            ))
+        log.info("discovery.intern_list", which=which, rows=len(data), kept=len(out))
         return out
 
     # -- Lever ------------------------------------------------------------

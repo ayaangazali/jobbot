@@ -93,12 +93,13 @@ def render(entries: list[Any], counts: dict[str, int], standard: dict[str, Any],
             f'<td><a href="{e(x.url)}" target=_blank rel=noopener>{e(x.title[:90])}</a></td>'
             f'<td class=dim>{e(x.location[:34])}</td>'
             f'<td class=dim>{fit}</td>'
+            f'<td class="dim{" bad" if x.ats in ("unknown", "") else ""}">{e(x.ats)}</td>'
             f'<td><span class="pill d-{e(x.decision)}" data-d>{e(x.decision)}</span></td>'
             f'</tr>')
 
     table = ("".join(rows) and
              f'<table><thead><tr><th></th><th>company</th><th>title</th>'
-             f'<th>location</th><th>fit</th><th>decision</th></tr></thead>'
+             f'<th>location</th><th>fit</th><th>ats</th><th>decision</th></tr></thead>'
              f'<tbody id=rows>{"".join(rows)}</tbody></table>'
              ) or '<div class=empty>nothing here yet &mdash; run a discovery</div>'
 
