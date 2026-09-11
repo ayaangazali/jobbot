@@ -608,3 +608,29 @@ def test_a_smartrecruiters_posting_points_at_its_application_form() -> None:
     # Another board's URL is left exactly as it is.
     assert apply_url("https://boards.greenhouse.io/x/jobs/1") == \
         "https://boards.greenhouse.io/x/jobs/1"
+
+
+def test_a_yes_no_answer_is_not_written_as_a_python_boolean(monkeypatch) -> None:
+    """Exa asks the sponsorship question as free text. str(True) put the word
+    "True" in front of the employer, and sponsorship is legally significant so
+    the healer may not rewrite it -- the application could not proceed."""
+    import asyncio
+
+    from jobbot.forms import fill
+    from jobbot.forms.model import (AnswerSource, FieldKind, FormField,
+                                    ProposedAnswer)
+
+    written: list[str] = []
+
+    async def fake_fill_text(page, field, value, sequential=False):
+        written.append(value)
+        return True
+
+    monkeypatch.setattr(fill, "fill_text", fake_fill_text)
+    field = FormField("q1", "Do you require Visa sponsorship?", FieldKind.TEXT,
+                      selector="#q1", required=True)
+    for value, expected in ((True, "Yes"), (False, "No"), ("H-1B", "H-1B")):
+        written.clear()
+        answer = ProposedAnswer("q1", value, AnswerSource.PROFILE, 1.0, "confirmed")
+        assert asyncio.run(fill.apply_answer(object(), field, answer))
+        assert written == [expected], f"{value!r} was written as {written!r}"

@@ -1111,7 +1111,13 @@ async def apply_answer(
             return await fill_date(page, field, str(v))
 
         sequential = any(h in field.label.lower() for h in AUTOCOMPLETE_HINTS)
-        return await fill_text(page, field, str(v), sequential=sequential)
+        # A yes/no answer reaching a free-text box must be written the way a
+        # person would write it. Exa asks "Do you require Visa sponsorship?"
+        # as free text; str(True) put the literal "True" in front of the
+        # employer, and because sponsorship is a legally significant field the
+        # healer is forbidden to rewrite it -- so the application deadlocked.
+        text = "Yes" if v is True else "No" if v is False else str(v)
+        return await fill_text(page, field, text, sequential=sequential)
 
     except Exception as exc:  # noqa: BLE001
         log.warning("fill.failed", label=field.label[:50],
