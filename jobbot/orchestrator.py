@@ -133,6 +133,11 @@ _AUTH_FIELD = re.compile(
     r"password|sign in|log in|email address\b.*(sign|log)|create account", re.I)
 
 
+# Workday wizards run to five steps; the cap stops a loop on a page that
+# keeps saying it advanced.
+MAX_WIZARD_STEPS = 8
+
+
 class HaltWithTabOpen(RuntimeError):
     """Stop the run without closing the browser, so the form can be inspected."""
 
@@ -753,6 +758,62 @@ class Orchestrator:
             "validation_errors": verification.validation_errors,
             "heal_rounds": rounds,
         }, indent=2))
+
+        # Workday is a five-step wizard -- My Information, My Experience,
+        # Application Questions, Voluntary Disclosures, Review -- and this
+        # filled the first page and then looked for a submit button that only
+        # exists on the last one. wd.advance() and wd.is_final_step() have been
+        # in the adapter all along with nothing calling them, which is why no
+        # Workday application has ever completed.
+        if det.ats is ATS.WORKDAY:
+            for step in range(1, MAX_WIZARD_STEPS + 1):
+                if await wd.is_final_step(page):
+                    log.info("apply.wizard_final_step", job_id=jid, step=step)
+                    break
+                moved, label = await wd.advance(page)
+                if not moved:
+                    log.info("apply.wizard_stuck", job_id=jid, step=step,
+                             detail=label[:80])
+                    break
+                await cap.settle(page, quiet_ms=1200)
+                log.info("apply.wizard_advanced", job_id=jid, step=step,
+                         now=label[:60])
+
+                form, pc_step = await ck.checkpoint_parse(page, self.llm, shots)
+                if not form.fields:
+                    continue
+                await discover_options(page, form)
+                det_step, leftover_step = deterministic_answers(
+                    self.profile, form,
+                    published_salary=(post.salary_min, post.salary_max))
+                leftover_step = [f for f in leftover_step
+                                 if f.kind is not FieldKind.FILE]
+                llm_step = await asyncio.to_thread(
+                    model_answers, self.llm, self.profile, leftover_step,
+                    job_context=f"{post.title} at {post.company}",
+                    images=pc_step.tiles, aria=pc_step.aria)
+                step_answers = det_step + llm_step
+
+                by_id_step = {f.field_id: f for f in form.fields}
+                for f in form.fields:
+                    if f.kind is FieldKind.FILE and not any(
+                            a.field_id == f.field_id for a in step_answers) and not re.search(
+                            r"cover[\s_-]*letter|transcript|portfolio",
+                            f"{f.label} {f.field_id}", re.I):
+                        step_answers.append(ProposedAnswer(
+                            f.field_id, str(resume_pdf), AnswerSource.PROFILE, 1.0,
+                            "resume for this role"))
+                for a in step_answers:
+                    f = by_id_step.get(a.field_id)
+                    if f is not None and a.submittable:
+                        await apply_answer(page, f, a, resume_path=resume_pdf)
+                answers.extend(step_answers)
+
+                verification, rounds = await ck.heal(
+                    page, self.llm, self.profile, form, step_answers, shots,
+                    max_rounds=max(2, self.cfg.max_heal_rounds // 2),
+                    resume_path=resume_pdf)
+                dump_answers()
 
         self.tracker.update(jid, questions_total=len(form.fields),
                             questions_answered=filled,
