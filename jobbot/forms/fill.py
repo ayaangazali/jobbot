@@ -419,8 +419,18 @@ async def fill_combobox(page: Any, field: FormField, value: str) -> bool:
     # opens the menu (aria-expanded goes true, and aria-controls appears --
     # these inputs have neither until then, so reading the options depends on
     # this step working). A click instead would close a menu already open.
+    # Clearing only makes sense on something that holds text. Workday renders
+    # its dropdowns as <button>, where fill() fails outright -- "How Did You
+    # Hear About Us?" logged clear_blocked twice and never opened.
+    tag = ""
+    with contextlib.suppress(Exception):
+        tag = (await loc.evaluate("e => e.tagName") or "").lower()
+    fillable = tag in ("input", "textarea")
+
     pre_opts: list[str] = []
     for attempt in (1, 2):
+        if not fillable:
+            break
         try:
             await loc.fill("")
             await asyncio.sleep(0.4)
