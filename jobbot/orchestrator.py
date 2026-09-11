@@ -140,6 +140,8 @@ _AUTH_FIELD = re.compile(
 MAX_WIZARD_STEPS = 8
 # How long to give a submit to answer. Ashby's reCAPTCHA alone budgets 30s.
 SUBMIT_WAIT_S = 30
+# Clicking submit gets retries: the page is often still settling.
+SUBMIT_CLICK_TRIES = 5
 
 
 async def _settle_after_submit(page: Any) -> str:
@@ -906,18 +908,34 @@ class Orchestrator:
 
         # --- submit --------------------------------------------------------
         submitted_click, click_error = False, ""
-        for sel in (f"button:has-text({q(form.submit_label)})",
-                    "[data-automation-id='bottom-navigation-submit-button']",
-                    "button[type=submit]", "input[type=submit]"):
-            try:
-                loc = page.locator(sel).first
-                if await loc.count() and await loc.is_visible():
-                    await loc.click(timeout=8000)
-                    submitted_click = True
-                    break
-            except Exception as exc:  # noqa: BLE001
-                click_error = str(exc)[:120]
-                continue
+        selectors = (f"button:has-text({q(form.submit_label)})",
+                     "[data-automation-id='bottom-navigation-submit-button']",
+                     "button[type=submit]", "input[type=submit]")
+        # A single pass was the reason two filled applications were never
+        # sent. The page is still settling when the last field is written --
+        # a textarea grows to fit an essay and everything below it moves --
+        # and a humanised click refuses a target whose position is still
+        # changing. The button is not missing, it is moving, so wait for it
+        # to stop rather than give up on the first refusal.
+        for attempt in range(SUBMIT_CLICK_TRIES):
+            for sel in selectors:
+                try:
+                    loc = page.locator(sel).first
+                    if await loc.count() and await loc.is_visible():
+                        await loc.scroll_into_view_if_needed(timeout=4000)
+                        await loc.click(timeout=8000)
+                        submitted_click = True
+                        break
+                except Exception as exc:  # noqa: BLE001
+                    click_error = str(exc)[:120]
+                    continue
+            if submitted_click:
+                break
+            if attempt < SUBMIT_CLICK_TRIES - 1:
+                log.debug("apply.submit_click_retry", job_id=jid,
+                          attempt=attempt + 1, detail=click_error[:80])
+                await cap.settle(page, quiet_ms=1500)
+                await asyncio.sleep(2)
 
         # Whether the button was ever clicked was worked out here and then
         # thrown away, so a submit that never happened and a submit that
