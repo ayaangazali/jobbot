@@ -102,6 +102,9 @@ _SCREENING_MAP: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(ai|artificial intelligence)\s+policy|policy for application|acknowledge.{0,30}(policy|guidelines)", re.I), "policy_acknowledgement"),
     (re.compile(r"related to|family member.*employe", re.I), "related_to_employee"),
     (re.compile(r"professional licen[sc]e", re.I), "professional_license"),
+    (re.compile(r"graduat\w*\s*(date|year|term|month|semester)"
+                r"|(date|year|month|when)\b.{0,20}graduat"
+                r"|(expected|anticipated|planned)\s+graduation\b", re.I), "graduation"),
     (re.compile(r"(highest )?(level of )?education|degree", re.I), "education_degree"),
     (re.compile(r"(available|earliest|preferred|desired).{0,12}(start|availab)"
                 r"|start date|when can you (start|begin)|date available", re.I),
@@ -237,6 +240,20 @@ def deterministic_answers(
                 answers.append(ProposedAnswer(
                     f.field_id, when.isoformat(), AnswerSource.DERIVED, 0.9,
                     f"earliest_start {profile.earliest_start!r} resolved against today"))
+                continue
+
+        elif key == "graduation":
+            # Nothing derived this, so the model composed "2028" -- which a
+            # date picker cannot parse. The profile states the date; a field
+            # that wants only the year gets the year back out in fill.
+            when = next((e.end for e in profile.education if e.end), None)
+            if when is not None:
+                val: Any = when.isoformat()
+                if real_options(f):
+                    chosen, _, _ = match_option(str(when.year), f.option_labels())
+                    val = chosen or str(when.year)
+                answers.append(ProposedAnswer(f.field_id, val, AnswerSource.PROFILE,
+                                              1.0, "profile education end date"))
                 continue
 
         elif key == "gpa":

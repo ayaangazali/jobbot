@@ -1085,12 +1085,15 @@ async def apply_answer(
             # "Expected Graduation Year" a date. Written as one, 2028 went
             # through a picker and came out 12/31/2027. Checking the label here
             # catches it whoever decided the kind.
-            if _YEAR_ONLY.search(field.label or ""):
-                year = re.search(r"(19|20)\d{2}", str(v))
-                log.debug("fill.year_not_date", label=field.label[:40],
-                          value=year.group() if year else str(v)[:12])
-                return await fill_text(page, field,
-                                       year.group() if year else str(v))
+            year = re.search(r"(19|20)\d{2}", str(v))
+            if year and _YEAR_ONLY.search(field.label or ""):
+                log.debug("fill.year_not_date", label=field.label[:40], value=year.group())
+                if await fill_text(page, field, year.group()):
+                    return True
+                # Deepgram words the question "Expected Graduation Year" and
+                # then renders a date picker, which discards four bare digits
+                # and leaves the field empty. The wording loses to the control.
+                log.debug("fill.year_rejected_using_date", label=field.label[:40])
             return await fill_date(page, field, str(v))
 
         sequential = any(h in field.label.lower() for h in AUTOCOMPLETE_HINTS)

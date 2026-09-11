@@ -572,3 +572,21 @@ def test_a_year_only_question_is_not_answered_with_a_full_date() -> None:
     for label in ("Graduation date", "Expected graduation date (month/year)",
                   "Start date"):
         assert not _YEAR_ONLY.search(label), label
+
+
+def test_a_graduation_field_is_answered_from_the_profile(profile: Profile) -> None:
+    """Nothing derived graduation, so the model composed a bare "2028" and the
+    date picker discarded it -- the field stayed empty and the application
+    halted. The profile states the date, so the answer comes from there."""
+    from jobbot.forms.model import FieldKind, FormField, ParsedForm
+    from jobbot.healer.answer import deterministic_answers
+
+    def answer(label: str, kind: FieldKind) -> object:
+        field = FormField("f1", label, kind, required=True)
+        found, _ = deterministic_answers(profile, ParsedForm(fields=[field]))
+        return found[0].value if found else None
+
+    end = next(e.end for e in profile.education if e.end)
+    assert answer("Expected Graduation Year", FieldKind.DATE) == end.isoformat()
+    # "Are you a recent graduate?" is a yes/no, not a date.
+    assert answer("Are you a recent graduate?", FieldKind.RADIO) != end.isoformat()
