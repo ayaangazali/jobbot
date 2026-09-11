@@ -71,6 +71,8 @@ class RunConfig:
     make_github_project: bool = True
     publish_project_private: bool = False
     max_heal_rounds: int = 4
+    # How many times to work the same application before moving on.
+    attempts_per_job: int = 1
     # Stay on one application until it is submitted. A form that has been
     # filled and healed represents real work and a real tab; abandoning it to
     # start the next job throws that away and leaves the candidate with
@@ -106,6 +108,23 @@ _REJECTED_AT_SUBMIT = re.compile(
 def _looks_rejected(evidence: str, errors: list[str]) -> bool:
     blob = " ".join([evidence or "", *(errors or [])])
     return bool(_REJECTED_AT_SUBMIT.search(blob))
+
+
+def _worth_retrying(r: "ApplicationResult") -> bool:
+    """Is another attempt at this job likely to get further?
+
+    Not for anything settled: a knockout answer will not change, a posting with
+    no form will not grow one, and a question only the candidate can answer
+    will not answer itself. Everything else -- an unhealed field, a browser
+    timeout, a sign-in that has since become possible -- is worth another go.
+    """
+    if r.status in (Status.SUBMITTED.value, Status.CONFIRMED.value,
+                    Status.KNOCKOUT_FAIL.value, "skipped"):
+        return False
+    settled = ("third-party apply", "no answerable fields",
+               "legally significant", "already applied")
+    blob = f"{r.reason} {' '.join(r.flagged or [])}".lower()
+    return not any(s in blob for s in settled)
 
 
 class HaltWithTabOpen(RuntimeError):
@@ -953,7 +972,24 @@ class Orchestrator:
                 log.info("run.company_cap_reached", company=post.company,
                          cap=self.cfg.per_company_cap)
                 continue
-            r = await self.apply_to(post)
+            # Stay on one job until it is in, rather than filing a failure and
+            # moving on. Most failures here are stateful, not permanent: a
+            # Workday account that did not exist a minute ago exists now, a
+            # menu that did not open will open, a heal round that ran out of
+            # attempts gets another form to work on. Retrying immediately costs
+            # a minute; coming back to it costs a whole pass.
+            r = None
+            for attempt in range(1, self.cfg.attempts_per_job + 1):
+                r = await self.apply_to(post)
+                if r.status in (Status.SUBMITTED.value, Status.CONFIRMED.value):
+                    break
+                if not _worth_retrying(r):
+                    break
+                if attempt < self.cfg.attempts_per_job:
+                    log.info("run.retrying_job", job_id=post.job_id,
+                             company=post.company, attempt=attempt + 1,
+                             of=self.cfg.attempts_per_job, after=r.status)
+                    await asyncio.sleep(random.uniform(4.0, 9.0))
             results.append(r)
             if r.status in (Status.SUBMITTED.value, Status.CONFIRMED.value) and key:
                 applied_companies[key] = applied_companies.get(key, 0) + 1

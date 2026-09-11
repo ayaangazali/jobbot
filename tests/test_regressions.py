@@ -490,3 +490,30 @@ def test_a_refused_submit_is_not_recorded_as_submitted() -> None:
     assert not _looks_rejected(
         "Thank you for applying! Your application has been received.", [])
     assert not _looks_rejected("", []), "no evidence stays ambiguous, not rejected"
+
+
+def test_only_unsettled_failures_are_retried() -> None:
+    """Retry the job until it is in -- but not when the answer will not change.
+
+    A knockout, a posting with no form, and a question only the candidate can
+    answer are settled: repeating them burns the run. A browser timeout or an
+    unhealed field is not.
+    """
+    from jobbot.orchestrator import ApplicationResult, _worth_retrying
+    from jobbot.tracker.csv_tracker import Status
+
+    def r(status, reason="", flagged=None):
+        return ApplicationResult("j", status, reason, flagged=flagged or [])
+
+    assert not _worth_retrying(r(Status.CONFIRMED.value))
+    assert not _worth_retrying(r(Status.SUBMITTED.value))
+    assert not _worth_retrying(r(Status.KNOCKOUT_FAIL.value, "requires citizenship"))
+    assert not _worth_retrying(r(Status.UNREACHABLE.value,
+                                 "only third-party apply offered: Apply With Indeed"))
+    assert not _worth_retrying(r(Status.FAILED.value, "no answerable fields found"))
+    assert not _worth_retrying(r(Status.NEEDS_HUMAN.value,
+                                 "legally significant answer missing from profile"))
+
+    assert _worth_retrying(r(Status.NEEDS_HUMAN.value, "verification not clean"))
+    assert _worth_retrying(r(Status.UNREACHABLE.value, "Timeout 8000ms exceeded"))
+    assert _worth_retrying(r(Status.FAILED.value, "sign-in did not take"))

@@ -205,6 +205,7 @@ def cmd_run(args) -> int:
         per_company_cap=10_000 if args.approved else RunConfig.per_company_cap,
         persist_until_submitted=args.persist,
         max_heal_rounds=12 if args.persist else RunConfig.max_heal_rounds,
+        attempts_per_job=args.attempts,
     )
 
     async def go():
@@ -343,6 +344,8 @@ def main(argv: list[str] | None = None) -> int:
                                     "(default: data/standard_resume.pdf if present)")
     r.add_argument("--tailor", action="store_true",
                    help="generate a resume per application instead of sending the standard one")
+    r.add_argument("--attempts", type=int, default=1,
+                   help="work the same application up to N times before moving on")
     r.add_argument("--persist", action="store_true",
                    help="work one application until it submits; on failure stop "
                         "with the tab open instead of moving on")
