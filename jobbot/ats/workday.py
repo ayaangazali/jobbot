@@ -285,9 +285,11 @@ async def ensure_account(
     try:
         await _fill_when_ready(page, A["email"], email)
         await _fill_when_ready(page, A["password"], password)
-        vp = page.locator(A["verify_password"]).first
-        if await vp.count():
-            await vp.fill(password)
+        # Same treatment as the two fields above: this one was still using a
+        # raw fill, and failed with "Element [data-automation-id='verifyPass...']"
+        # on every account creation -- the modal duplicates it too.
+        if await page.locator(A["verify_password"]).count():
+            await _fill_when_ready(page, A["verify_password"], password)
 
         # Workday's account-creation consent checkbox is required and is not
         # always labelled consistently.
