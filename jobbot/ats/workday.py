@@ -148,11 +148,20 @@ async def _fill_when_ready(page: Any, sel: str, value: str,
     Workday re-renders the sign-in panel as it loads, so a locator resolved a
     moment earlier detaches under us. Retrying once after the page settles
     covers the re-render.
+
+    The retry also clears overlays first. Banners are dismissed before the
+    sign-in link is clicked, but clicking it re-renders the panel and the
+    banner comes back on top of the field -- which is the "element is covered"
+    that took out Blue Origin, AeroVironment, GE Vernova and Allegion. The
+    guard belongs here, where every one of those fills goes through.
     """
     loc = await _live(page, sel, timeout)
     try:
         await loc.fill(value)
-    except Exception:  # noqa: BLE001
+    except Exception as first:  # noqa: BLE001
+        if "covered" in str(first).lower():
+            log.debug("workday.field_covered", selector=sel[:60])
+        await cap.dismiss_overlays(page)
         await cap.settle(page, quiet_ms=800)
         loc = await _live(page, sel, timeout)
         await loc.fill(value)
