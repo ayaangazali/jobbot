@@ -672,16 +672,25 @@ _RADIO_PICK_JS = r"""
       ? 1000 : words.filter(w => txt.includes(w)).length;
 
   if (!group.length && radios.length && qn) {
-    let best = null, bestScore = 0;
+    // Score every ancestor of each group, and remember how far up the match
+    // was. Two things go wrong otherwise, both seen on one Ashby EEOC form:
+    // stopping at the first ancestor with any text in it never reaches the
+    // question ("Gender" stopped at the word "Male"), and every group shares
+    // the outer EEOC container, so on a short question like "Race" all three
+    // groups match -- the nearest match is the one actually being asked.
+    let best = null, bestScore = 0, bestDepth = 99;
     for (const n of [...new Set(radios.map(r => r.name))]) {
       const g = radios.filter(r => r.name === n);
-      let holder = g[0];
-      for (let i = 0; i < 6 && holder && holder.parentElement; i++) {
+      let sc = 0, depth = 99, holder = g[0];
+      for (let i = 1; i <= 6 && holder && holder.parentElement; i++) {
         holder = holder.parentElement;
-        if (norm(holder.innerText).length > qn.length / 2) break;
+        const s = scoreText(norm(holder.innerText));
+        if (s > sc) { sc = s; depth = i; }
+        if (sc >= 1000) break;
       }
-      const sc = scoreText(norm(holder ? holder.innerText : ''));
-      if (sc > bestScore) { bestScore = sc; best = g; }
+      if (sc > bestScore || (sc === bestScore && sc > 0 && depth < bestDepth)) {
+        bestScore = sc; bestDepth = depth; best = g;
+      }
     }
     if (bestScore > 0) group = best;
   }
@@ -773,6 +782,12 @@ async def fill_radio(page: Any, field: FormField, value: Any) -> bool:
 
     log.warning("fill.radio_not_found", label=field.label[:50], chose=str(chosen)[:30])
     return False
+
+
+# "Expected Graduation Year" wants 2028; "Graduation date" and "Expected
+# graduation date (month/year)" both want a date, so the word "date" anywhere
+# in the label -- before or after "year" -- rules the shorthand out.
+_YEAR_ONLY = re.compile(r"^(?!.*\bdate\b).*\byear\b", re.I | re.S)
 
 
 async def fill_date(page: Any, field: FormField, value: str) -> bool:
@@ -1066,6 +1081,16 @@ async def apply_answer(
             return await fill_checkbox(page, field, want)
 
         if field.kind is FieldKind.DATE:
+            # The kind can come from the vision pass, which called Deepgram's
+            # "Expected Graduation Year" a date. Written as one, 2028 went
+            # through a picker and came out 12/31/2027. Checking the label here
+            # catches it whoever decided the kind.
+            if _YEAR_ONLY.search(field.label or ""):
+                year = re.search(r"(19|20)\d{2}", str(v))
+                log.debug("fill.year_not_date", label=field.label[:40],
+                          value=year.group() if year else str(v)[:12])
+                return await fill_text(page, field,
+                                       year.group() if year else str(v))
             return await fill_date(page, field, str(v))
 
         sequential = any(h in field.label.lower() for h in AUTOCOMPLETE_HINTS)

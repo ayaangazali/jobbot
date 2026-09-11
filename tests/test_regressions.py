@@ -559,3 +559,16 @@ def test_phone_adjacent_fields_do_not_get_the_phone_number() -> None:
     assert key_for("Phone Extension") is None
     assert key_for("Phone Device Type") is None
     assert key_for("Country Phone Code") == "identity.phone_country"
+
+
+def test_a_year_only_question_is_not_answered_with_a_full_date() -> None:
+    """"Expected Graduation Year" was filled with 12/31/2027 for a May 2028
+    graduation: the date formatter ran on a field that wants four digits, and
+    the form both rejected it and stated the wrong year."""
+    from jobbot.forms.fill import _YEAR_ONLY
+
+    for label in ("Expected Graduation Year", "Year of graduation", "Grad year"):
+        assert _YEAR_ONLY.search(label), label
+    for label in ("Graduation date", "Expected graduation date (month/year)",
+                  "Start date"):
+        assert not _YEAR_ONLY.search(label), label
