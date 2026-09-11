@@ -634,3 +634,28 @@ def test_a_yes_no_answer_is_not_written_as_a_python_boolean(monkeypatch) -> None
         answer = ProposedAnswer("q1", value, AnswerSource.PROFILE, 1.0, "confirmed")
         assert asyncio.run(fill.apply_answer(object(), field, answer))
         assert written == [expected], f"{value!r} was written as {written!r}"
+
+
+def test_a_compound_sponsorship_question_gets_more_than_yes(profile: Profile) -> None:
+    """Exa asks "Do you require Visa sponsorship? If so, which one? And when
+    does your Visa expire?" as free text. "Yes" answers a third of it, and the
+    verifier blocked it as uninformative on a field the healer may not touch.
+
+    The candidate's own words go in verbatim -- nothing about immigration
+    status is paraphrased -- and the unknown expiry is stated as unknown
+    rather than invented or silently skipped.
+    """
+    import re
+
+    from jobbot.healer.answer import _sponsorship_prose
+
+    compound = ("Do you require Visa sponsorship to work in your selected location? "
+                "If so, which one? And when does your Visa expire?")
+    status = str(profile.answer("visa_status").value)
+    said = _sponsorship_prose(profile, True, compound)
+    assert said.startswith("Yes")
+    assert status in said, "the candidate's own words, not a paraphrase"
+    assert "expiry" in said, "the expiry part is answered, not dropped"
+    assert not re.search(r"\b20\d\d\b", said), "an expiry date is never invented"
+
+    assert _sponsorship_prose(profile, False, compound).startswith("No")

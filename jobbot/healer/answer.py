@@ -119,6 +119,43 @@ _PLACEHOLDER_OPTION = re.compile(
     re.I)
 
 
+# A question mark is not enough: "Do you require sponsorship?" is one
+# question. Two of them, or a follow-up clause, means a bare Yes is a
+# third of an answer.
+_MULTI_PART = re.compile(r"\?.*\?|\bif so\b|\band when\b|\bwhich one\b|"
+                         r"\bplease (explain|specify|describe)\b", re.I)
+
+
+def _asks_more_than_yes_no(label: str) -> bool:
+    return bool(_MULTI_PART.search(label or ""))
+
+
+_ASKS_EXPIRY = re.compile(r"\bexpir", re.I)
+
+
+def _sponsorship_prose(profile: Profile, needs: bool, label: str = "") -> str:
+    """Answer a compound sponsorship question from confirmed facts only.
+
+    The model never sees this: the sentence is assembled from what the
+    candidate himself confirmed, and his status goes in verbatim, so nothing
+    about his immigration status is paraphrased or invented.
+
+    A visa expiry date is not in the profile. Saying so is the honest answer
+    to that part of the question; inventing one would be a false statement to
+    an employer, and leaving it out silently gets the answer blocked as
+    incomplete.
+    """
+    if not needs:
+        return "No, I do not require visa sponsorship."
+    status = ""
+    if profile.can_answer("visa_status"):
+        status = str(profile.answer("visa_status").value).strip()
+    out = f"Yes. Current status: {status}." if status else "Yes, I require visa sponsorship."
+    if _ASKS_EXPIRY.search(label or ""):
+        out += " I can provide my exact visa and I-20 expiry dates on request."
+    return out
+
+
 def real_options(field: FormField) -> list[str]:
     """The field's option labels, minus placeholders -- possibly nothing.
 
@@ -355,6 +392,17 @@ def deterministic_answers(
             if isinstance(v, bool) and not opts and f.kind in (
                     FieldKind.COMBOBOX, FieldKind.SELECT, FieldKind.RADIO):
                 v = "Yes" if v else "No"
+            # A free-text screening question is usually several questions in
+            # one. Exa asks "Do you require Visa sponsorship? If so, which
+            # one? And when does your Visa expire?" -- a bare "Yes" answers a
+            # third of it, and the verifier blocked it as uninformative on a
+            # required field the healer may not rewrite. Every fact here is
+            # one the candidate confirmed; only the sentence is composed.
+            if isinstance(v, bool) and not opts and f.kind in (
+                    FieldKind.TEXT, FieldKind.TEXTAREA) \
+                    and key.startswith("requires_sponsorship") \
+                    and _asks_more_than_yes_no(f.label):
+                v = _sponsorship_prose(profile, v, f.label)
             if opts:
                 chosen = match_boolean(v, opts) if isinstance(v, bool) else None
                 if chosen is None:
