@@ -512,6 +512,15 @@ class Orchestrator:
                                                  f"account wall: {res.error}")
                     log.info("apply.account_ok", created=res.created,
                              emailed_code=res.needed_email_code)
+                    # Signing in returns to the posting, not to the form.
+                    # Blackstone signed in cleanly and then reported "form
+                    # still gated behind sign-in" on three attempts, because
+                    # nothing clicked Apply again once we were through the
+                    # door.
+                    if await wd.needs_account(page):
+                        log.info("apply.reentering_after_signin", job_id=jid)
+                        await wd.start_application(page)
+                        await cap.settle(page, quiet_ms=900)
             else:
                 self.tracker.update(jid, status=Status.UNREACHABLE.value,
                                     error=f"{det.ats.value} requires an account; no adapter yet")
