@@ -636,6 +636,13 @@ class Orchestrator:
             return ApplicationResult(jid, Status.KNOCKOUT_FAIL.value, reason)
 
         # --- resume ------------------------------------------------------
+        # Where to come back to. Getting here may have cost several steps --
+        # Oracle's email gate, a Workday sign-in -- and form_url still points
+        # at the job description from before any of that. Returning to it
+        # threw the whole gate away: the first American Express application
+        # reached the form, prepared a resume, and then went back to the
+        # advert and reported zero fields.
+        form_url = page.url or form_url
         resume_pdf, project_url, failure = await self._resume_for(page, post, audit, jid)
         if failure is not None:
             return failure
@@ -645,6 +652,9 @@ class Orchestrator:
         await cap.settle(page, quiet_ms=800)
         if det.ats in REQUIRES_ACCOUNT and det.ats is ATS.WORKDAY:
             await wd.start_application(page)
+        elif det.ats is ATS.ORACLE:
+            # Returning to a section URL can bounce back through the gate.
+            await orc.start_application(page, self.profile.identity.email_str)
         form, pc2 = await ck.checkpoint_parse(page, self.llm, shots)
 
         # Read every option list before composing a single answer: a control
