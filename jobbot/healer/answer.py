@@ -48,6 +48,11 @@ _IDENTITY_MAP: list[tuple[re.Pattern[str], str]] = [
     # number. This is the classic wrong-field bug -- a positional or greedy
     # match writes the phone number into the country selector.
     (re.compile(r"phone\s*(country|code)|country\s*code|dial\s*code", re.I), "phone_country"),
+    # Not every field with "phone" in it wants the number. Workday's My
+    # Information page has Phone Extension and Phone Device Type beside it,
+    # and both were filled with 6693609914 -- a phone number recorded as an
+    # extension, and as a device type.
+    (re.compile(r"phone\s*(extension|ext\b|device|type)|extension\b", re.I), None),
     (re.compile(r"\bphone\b|\bmobile\b|\btelephone\b", re.I), "phone"),
     (re.compile(r"\blinked\s*in\b", re.I), "linkedin"),
     (re.compile(r"\bgithub\b", re.I), "github"),
@@ -156,6 +161,10 @@ def classify(field: FormField) -> None:
             return
     for pat, key in _IDENTITY_MAP:
         if pat.search(label):
+            # A None key means the label matched something we must NOT fill
+            # from identity -- "Phone Extension" is not a phone number.
+            if key is None:
+                return
             field.profile_key = f"identity.{key}"
             return
     if _GPA.search(label):

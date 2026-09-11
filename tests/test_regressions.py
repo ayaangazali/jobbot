@@ -537,3 +537,25 @@ def test_a_workday_posting_is_read_in_english() -> None:
         "https://allegion.wd5.myworkdayjobs.com/careers/job/Indy/X_1"
     assert workday_en_url("https://boards.greenhouse.io/x/jobs/1") == \
         "https://boards.greenhouse.io/x/jobs/1"
+
+
+def test_phone_adjacent_fields_do_not_get_the_phone_number() -> None:
+    """Workday puts Phone Extension and Phone Device Type beside Phone Number.
+
+    All three matched the phone pattern, so the candidate's number was entered
+    as his extension and as his device type -- wrong data on the form, not a
+    gap in it.
+    """
+    from jobbot.forms.model import FieldKind, FormField
+    from jobbot.healer.answer import classify
+
+    def key_for(label: str):
+        f = FormField(field_id="x", label=label, kind=FieldKind.TEXT)
+        classify(f)
+        return f.profile_key
+
+    assert key_for("Phone Number") == "identity.phone"
+    assert key_for("Mobile Phone") == "identity.phone"
+    assert key_for("Phone Extension") is None
+    assert key_for("Phone Device Type") is None
+    assert key_for("Country Phone Code") == "identity.phone_country"
