@@ -25,6 +25,7 @@ So the pipeline is cheap-to-expensive:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -137,6 +138,37 @@ _AUTH_FIELD = re.compile(
 # Workday wizards run to five steps; the cap stops a loop on a page that
 # keeps saying it advanced.
 MAX_WIZARD_STEPS = 8
+# How long to give a submit to answer. Ashby's reCAPTCHA alone budgets 30s.
+SUBMIT_WAIT_S = 30
+
+
+async def _settle_after_submit(page: Any) -> str:
+    """Wait for the page to answer the submit, not for a fixed 2.5 seconds.
+
+    Ashby posts the application, runs an invisible reCAPTCHA whose own budget
+    is thirty seconds, and only then re-renders. Screenshotting after a flat
+    pause caught the unchanged form, and the outcome pass -- correctly, for
+    what it was shown -- reported the application as not submitted.
+
+    Returns what ended the wait, for the log.
+    """
+    gone = """() => {
+      const t = document.body.innerText;
+      if (/thank you|application (was )?(received|submitted)|we.{0,3}ve received/i.test(t))
+        return 'confirmation text';
+      const f = [...document.querySelectorAll('button')].find(b => /submit/i.test(b.innerText));
+      return f ? '' : 'submit button gone';
+    }"""
+    before = page.url
+    for _ in range(SUBMIT_WAIT_S):
+        await asyncio.sleep(1)
+        if page.url != before:
+            return "url changed"
+        with contextlib.suppress(Exception):
+            why = await page.evaluate(gone)
+            if why:
+                return why
+    return "timed out"
 
 
 class HaltWithTabOpen(RuntimeError):
@@ -873,7 +905,7 @@ class Orchestrator:
                                      heal_rounds=rounds)
 
         # --- submit --------------------------------------------------------
-        submitted_click = False
+        submitted_click, click_error = False, ""
         for sel in (f"button:has-text({q(form.submit_label)})",
                     "[data-automation-id='bottom-navigation-submit-button']",
                     "button[type=submit]", "input[type=submit]"):
@@ -883,9 +915,23 @@ class Orchestrator:
                     await loc.click(timeout=8000)
                     submitted_click = True
                     break
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                click_error = str(exc)[:120]
                 continue
-        await cap.settle(page, quiet_ms=2500)
+
+        # Whether the button was ever clicked was worked out here and then
+        # thrown away, so a submit that never happened and a submit that
+        # happened and showed nothing both came out as "no confirmation
+        # observed" -- two different faults, one indistinguishable message.
+        if not submitted_click:
+            detail = f"no clickable submit button ({click_error or 'none matched'})"
+            log.error("apply.submit_not_clicked", job_id=jid,
+                      label=form.submit_label[:40], detail=detail[:120])
+            self.tracker.update(jid, status=Status.NEEDS_HUMAN.value, error=detail)
+            raise HaltWithTabOpen(jid, verification.blockers)
+
+        log.info("apply.submit_clicked", job_id=jid, label=form.submit_label[:40])
+        await _settle_after_submit(page)
 
         # --- checkpoint 3: one call, did it actually go through? ----------
         outcome, _ = await ck.checkpoint_outcome(page, self.llm, shots)
