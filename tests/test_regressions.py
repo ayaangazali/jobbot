@@ -659,3 +659,19 @@ def test_a_compound_sponsorship_question_gets_more_than_yes(profile: Profile) ->
     assert not re.search(r"\b20\d\d\b", said), "an expiry date is never invented"
 
     assert _sponsorship_prose(profile, False, compound).startswith("No")
+
+
+def test_a_rate_limit_is_not_retried() -> None:
+    """Oracle answered a third attempt with "Too Many Attempts. Try Again
+    Later." and locked out the tenant. Retrying a rate limit is what causes
+    it, so it counts as settled."""
+    from jobbot.orchestrator import ApplicationResult, _worth_retrying
+    from jobbot.tracker.csv_tracker import Status
+
+    limited = ApplicationResult(
+        "oracle:1", Status.UNREACHABLE.value,
+        "still on the email step: Too Many Attempts. Try Again Later.")
+    assert not _worth_retrying(limited)
+    # An ordinary timeout is still worth another go.
+    assert _worth_retrying(ApplicationResult(
+        "oracle:2", Status.UNREACHABLE.value, "navigation timeout"))

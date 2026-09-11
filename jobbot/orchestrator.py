@@ -124,7 +124,11 @@ def _worth_retrying(r: "ApplicationResult") -> bool:
                     Status.KNOCKOUT_FAIL.value, "skipped"):
         return False
     settled = ("third-party apply", "no answerable fields",
-               "legally significant", "already applied")
+               "legally significant", "already applied",
+               # Retrying a rate limit is what caused it. Oracle answered the
+               # third attempt on one posting with "Too Many Attempts. Try
+               # Again Later." and locked the rest of the tenant out with it.
+               "too many attempts", "try again later", "rate limit")
     blob = f"{r.reason} {' '.join(r.flagged or [])}".lower()
     return not any(s in blob for s in settled)
 
