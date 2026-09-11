@@ -127,6 +127,12 @@ def _worth_retrying(r: "ApplicationResult") -> bool:
     return not any(s in blob for s in settled)
 
 
+# Labels that belong to a sign-in or registration form rather than to an
+# application: if these are all a page offers, the gate really is up.
+_AUTH_FIELD = re.compile(
+    r"password|sign in|log in|email address\b.*(sign|log)|create account", re.I)
+
+
 class HaltWithTabOpen(RuntimeError):
     """Stop the run without closing the browser, so the form can be inspected."""
 
@@ -533,10 +539,20 @@ class Orchestrator:
             {"submit": form.submit_label, "step": form.step,
              "fields": [f.to_prompt_dict() for f in form.fields]}, indent=2))
 
-        if form.requires_account:
+        # Vision decides whether a sign-in gate is up, and on Blackstone's form
+        # it answered differently on three consecutive attempts -- True, False,
+        # True -- for the same fourteen-field page we were already signed into.
+        # The DOM is evidence rather than a guess: a page offering several
+        # fields that are not credentials is the application, not the gate.
+        real_fields = [f for f in form.fields
+                       if not _AUTH_FIELD.search(f.label or "")]
+        if form.requires_account and len(real_fields) < 3:
             self.tracker.update(jid, status=Status.UNREACHABLE.value,
                                 error="form still gated behind sign-in")
             return ApplicationResult(jid, Status.UNREACHABLE.value, "sign-in gate")
+        if form.requires_account:
+            log.info("apply.gate_overruled_by_dom", job_id=jid,
+                     fields=len(real_fields))
 
         if not form.fields:
             # Distinguish "we could not read the form" from "there is no form".
