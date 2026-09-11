@@ -1081,6 +1081,8 @@ class Orchestrator:
         excluded = 0
         for p in posts:
             if self.tracker.already_applied(p.job_id):
+                log.info("plan.dropped", why="already_applied", job_id=p.job_id,
+                         company=p.company)
                 continue
             # A question only the candidate can answer will not answer itself
             # between runs. Databricks asks a sanctions disclosure and cost
@@ -1105,20 +1107,29 @@ class Orchestrator:
                     ats=p.ats.value, job_url=p.url,
                     status=Status.UNREACHABLE.value,
                     error="no ATS apply URL resolved; not applying via the aggregator"))
+                log.info("plan.dropped", why="no_ats", job_id=p.job_id,
+                         company=p.company, url=p.url[:80])
                 continue
             g = ghost_score(p, posts)
             if g > self.cfg.max_ghost_score:
+                log.info("plan.dropped", why="ghost", job_id=p.job_id,
+                         company=p.company, score=round(g, 2))
                 self.tracker.upsert(Application(
                     job_id=p.job_id, company=p.company, title=p.title, ats=p.ats.value,
                     job_url=p.url, status=Status.GHOST_SUSPECTED.value, ghost_score=str(g)))
                 continue
             m = fit_score(self.profile, p)
             if m < self.cfg.min_match_score:
+                log.info("plan.dropped", why="fit", job_id=p.job_id,
+                         company=p.company, score=round(m, 2),
+                         floor=self.cfg.min_match_score)
                 self.tracker.upsert(Application(
                     job_id=p.job_id, company=p.company, title=p.title, ats=p.ats.value,
                     job_url=p.url, status=Status.FILTERED_OUT.value, match_score=str(m)))
                 continue
             if applied_companies.get(p.company.lower(), 0) >= self.cfg.per_company_cap:
+                log.info("plan.dropped", why="company_cap", job_id=p.job_id,
+                         company=p.company)
                 continue
             queue.append((m, p))
 
