@@ -109,13 +109,23 @@ def _is_remote(text: str) -> bool:
     return bool(re.search(r"\bremote\b|\bwork from home\b|\banywhere\b", text or "", re.I))
 
 
-def _ashby_apply_url(j: dict[str, Any]) -> str:
-    """The application form, not the job description."""
-    url = (j.get("applyUrl") or j.get("jobUrl") or "").strip()
-    if not url or "/application" in url:
+def ashby_apply_url(url: str) -> str:
+    """The application form, not the job description.
+
+    Applies to any Ashby link whatever found it: the same posting arrives from
+    the board API and from the community internship lists, and only the board
+    was being corrected -- so Exa and Deepgram kept being read as pages with no
+    fields.
+    """
+    url = (url or "").strip()
+    if "ashbyhq.com" not in url or "/application" in url:
         return url
     base, sep, query = url.partition("?")
     return f"{base.rstrip('/')}/application" + (sep + query if sep else "")
+
+
+def _ashby_apply_url(j: dict[str, Any]) -> str:
+    return ashby_apply_url(j.get("applyUrl") or j.get("jobUrl") or "")
 
 
 def _ashby_salary(comp: dict[str, Any]) -> tuple[int | None, int | None]:
@@ -223,7 +233,7 @@ class Discovery:
                 continue
             if (j.get("category") or "Software") not in _INTERN_CATEGORIES:
                 continue
-            link = j.get("url") or ""
+            link = ashby_apply_url(j.get("url") or "")
             if not link:
                 continue
             posted = _from_epoch(j.get("date_posted") or j.get("date_updated"))
