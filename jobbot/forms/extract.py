@@ -166,7 +166,13 @@ _EXTRACT_JS = r"""
     // "candidate" do not qualify.
     if (kind === 'text') {
       const hint = ((el.getAttribute('placeholder') || '') + ' ' + raw).toLowerCase();
-      if (/\bdate\b|mm\s*\/\s*dd|dd\s*\/\s*mm|yyyy/.test(hint)) kind = 'date';
+      const yearOnly = /\byear\b/.test(hint) && !/\bdate\b|mm|dd/.test(hint);
+      // "Expected Graduation Year" wants 2028, not a calendar date. Treated as
+      // a date it was typed into a picker that resolved it to 12/31/2027 -- a
+      // year out, and wrong.
+      if (!yearOnly && /\bdate\b|mm\s*\/\s*dd|dd\s*\/\s*mm|yyyy/.test(hint)) {
+        kind = 'date';
+      }
     }
     out.push({
       label: raw.replace(/^~/, '').replace(/\s*\*\s*$/, '').trim(),
