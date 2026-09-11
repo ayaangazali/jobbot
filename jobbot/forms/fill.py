@@ -790,6 +790,24 @@ async def fill_radio(page: Any, field: FormField, value: Any) -> bool:
 _YEAR_ONLY = re.compile(r"^(?!.*\bdate\b).*\byear\b", re.I | re.S)
 
 
+async def _is_date_picker(page: Any, field: FormField) -> bool:
+    """Does this control only accept a date, whatever its label says?
+
+    Deepgram labels a field "Expected Graduation Year" and backs it with a
+    date picker. Typing "2028" into one sets the input's value -- so the write
+    reports success -- while the picker's own state stays empty and the form
+    keeps reporting the field as missing. Asking the control is the only
+    reliable way to tell; the wording is not evidence.
+    """
+    with contextlib.suppress(Exception):
+        loc = await _locate(page, field)
+        return await loc.evaluate(
+            "el => (el.type || '').toLowerCase() === 'date'"
+            " || /date/i.test(el.placeholder || '')"
+            " || /date/i.test(el.getAttribute('aria-describedby') || '')")
+    return False
+
+
 async def fill_date(page: Any, field: FormField, value: str) -> bool:
     """Write a date in the format the control actually parses.
 
@@ -1086,14 +1104,10 @@ async def apply_answer(
             # through a picker and came out 12/31/2027. Checking the label here
             # catches it whoever decided the kind.
             year = re.search(r"(19|20)\d{2}", str(v))
-            if year and _YEAR_ONLY.search(field.label or ""):
+            if year and _YEAR_ONLY.search(field.label or "") \
+                    and not await _is_date_picker(page, field):
                 log.debug("fill.year_not_date", label=field.label[:40], value=year.group())
-                if await fill_text(page, field, year.group()):
-                    return True
-                # Deepgram words the question "Expected Graduation Year" and
-                # then renders a date picker, which discards four bare digits
-                # and leaves the field empty. The wording loses to the control.
-                log.debug("fill.year_rejected_using_date", label=field.label[:40])
+                return await fill_text(page, field, year.group())
             return await fill_date(page, field, str(v))
 
         sequential = any(h in field.label.lower() for h in AUTOCOMPLETE_HINTS)
