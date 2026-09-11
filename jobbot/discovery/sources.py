@@ -109,6 +109,20 @@ def _is_remote(text: str) -> bool:
     return bool(re.search(r"\bremote\b|\bwork from home\b|\banywhere\b", text or "", re.I))
 
 
+# Workday puts the interface language in the path. One of Blackstone's
+# postings arrives from the internship lists as .../zh-CN/..., and the whole
+# application then renders in Chinese: the fields read 名, 姓, 地址行 1, and the
+# vision pass -- not recognising a form it could not read -- reported the
+# sign-in gate that was no longer there.
+_WD_LOCALE = re.compile(
+    r"(https?://[^/]+\.myworkdayjobs\.com)/([a-z]{2}-[A-Za-z]{2})(/|$)")
+
+
+def workday_en_url(url: str) -> str:
+    """The English rendering of a Workday posting."""
+    return _WD_LOCALE.sub(r"\1/en-US\3", url or "")
+
+
 def ashby_apply_url(url: str) -> str:
     """The application form, not the job description.
 
@@ -233,7 +247,7 @@ class Discovery:
                 continue
             if (j.get("category") or "Software") not in _INTERN_CATEGORIES:
                 continue
-            link = ashby_apply_url(j.get("url") or "")
+            link = workday_en_url(ashby_apply_url(j.get("url") or ""))
             if not link:
                 continue
             posted = _from_epoch(j.get("date_posted") or j.get("date_updated"))

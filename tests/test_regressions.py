@@ -517,3 +517,23 @@ def test_only_unsettled_failures_are_retried() -> None:
     assert _worth_retrying(r(Status.NEEDS_HUMAN.value, "verification not clean"))
     assert _worth_retrying(r(Status.UNREACHABLE.value, "Timeout 8000ms exceeded"))
     assert _worth_retrying(r(Status.FAILED.value, "sign-in did not take"))
+
+
+def test_a_workday_posting_is_read_in_english() -> None:
+    """Blackstone's link arrives as /zh-CN/ and the whole form renders in Chinese.
+
+    The fields came back as 名, 姓, 地址行 1, and the vision pass -- unable to
+    recognise a form it could not read -- reported a sign-in gate that was no
+    longer there, on every attempt.
+    """
+    from jobbot.discovery.sources import workday_en_url
+
+    assert workday_en_url(
+        "https://blackstone.wd1.myworkdayjobs.com/zh-CN/Campus/job/Miami/X_1") == \
+        "https://blackstone.wd1.myworkdayjobs.com/en-US/Campus/job/Miami/X_1"
+    # No locale segment, or already English: unchanged.
+    assert workday_en_url(
+        "https://allegion.wd5.myworkdayjobs.com/careers/job/Indy/X_1") == \
+        "https://allegion.wd5.myworkdayjobs.com/careers/job/Indy/X_1"
+    assert workday_en_url("https://boards.greenhouse.io/x/jobs/1") == \
+        "https://boards.greenhouse.io/x/jobs/1"
