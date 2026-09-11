@@ -1064,6 +1064,15 @@ class Orchestrator:
         for p in posts:
             if self.tracker.already_applied(p.job_id):
                 continue
+            # A question only the candidate can answer will not answer itself
+            # between runs. Databricks asks a sanctions disclosure and cost
+            # three minutes of every run reaching the same halt.
+            row = self.tracker.get(p.job_id)
+            if row is not None and row.status == Status.NEEDS_HUMAN.value \
+                    and "legally significant" in (row.error or ""):
+                log.info("plan.awaiting_candidate_answer", job_id=p.job_id,
+                         company=p.company, question=(row.error or "")[:70])
+                continue
             if self.profile.excludes(p.company):
                 excluded += 1
                 continue
