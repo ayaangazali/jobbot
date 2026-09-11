@@ -547,7 +547,8 @@ class Orchestrator:
         # verification code -- so it is handled here rather than below.
         if det.ats is ATS.ORACLE:
             ok, detail = await orc.start_application(
-                page, self.profile.identity.email_str)
+                page, self.profile.identity.email_str,
+                gmail_enabled=self.cfg.gmail_enabled)
             if not ok:
                 self.tracker.update(jid, status=Status.UNREACHABLE.value,
                                     error=detail[:250])
@@ -654,7 +655,8 @@ class Orchestrator:
             await wd.start_application(page)
         elif det.ats is ATS.ORACLE:
             # Returning to a section URL can bounce back through the gate.
-            await orc.start_application(page, self.profile.identity.email_str)
+            await orc.start_application(page, self.profile.identity.email_str,
+                                        gmail_enabled=self.cfg.gmail_enabled)
         form, pc2 = await ck.checkpoint_parse(page, self.llm, shots)
 
         # Read every option list before composing a single answer: a control

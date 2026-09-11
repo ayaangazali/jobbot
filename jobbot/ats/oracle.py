@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from typing import Any
 
 import structlog
@@ -107,7 +108,51 @@ async def _tick_terms(page: Any) -> bool:
     return await box.is_checked()
 
 
-async def start_application(page: Any, email: str) -> tuple[bool, str]:
+_CODE_FIELD = ("input[id*='verification' i]", "input[id*='code' i]",
+               "input[name*='code' i]", "input[type='text'][maxlength='6']")
+
+
+async def _confirm_identity(page: Any, email: str, sent_at: float,
+                            gmail_enabled: bool, timeout_s: int = 180) -> tuple[bool, str]:
+    """Type the code Oracle emails before it will show the application.
+
+    The first posting opened went straight to the form; every one after it
+    stopped on "Confirm Your Identity" instead. Without this the step just
+    reported "still on the email step" and three attempts spent themselves
+    against a page waiting for a six-digit number sitting in the inbox.
+    """
+    field = None
+    for sel in _CODE_FIELD:
+        loc = page.locator(sel).first
+        with_suppressed = (Exception,)
+        try:
+            if await loc.count() and await loc.is_visible():
+                field = loc
+                break
+        except with_suppressed:
+            continue
+    if field is None:
+        return False, "identity confirmation shown but no code field found"
+    if not gmail_enabled:
+        return False, "email verification required but Gmail is disabled"
+
+    from jobbot.mail.gmail import wait_for_code
+    found = await asyncio.to_thread(
+        wait_for_code, from_contains="", subject_contains="",
+        newer_than_ts=sent_at, timeout_s=timeout_s)
+    if not found:
+        return False, "verification code did not arrive in time"
+    await field.fill(found.code)
+    await _click_first(page, ["button:has-text('Verify')"] + list(_NEXT))
+    await cap.settle(page, quiet_ms=2500)
+    if "/apply/email" in page.url:
+        return False, f"code {found.code[:2]}.. rejected: {await _errors(page)}"
+    log.info("oracle.identity_confirmed", email=email.split("@")[0] + "@...")
+    return True, page.url
+
+
+async def start_application(page: Any, email: str, *,
+                            gmail_enabled: bool = True) -> tuple[bool, str]:
     """Get from the posting to the application form. Returns (ok, detail)."""
     await dismiss_cookies(page)
 
@@ -127,12 +172,24 @@ async def start_application(page: Any, email: str) -> tuple[bool, str]:
     if not await _tick_terms(page):
         return False, "could not tick the terms checkbox"
 
+    sent_at = time.time()
     if not await _click_first(page, _NEXT):
         return False, "no Next button on the email step"
     await cap.settle(page, quiet_ms=3000)
 
+    if "/apply/email" in page.url and await _wants_code(page):
+        ok, detail = await _confirm_identity(page, email, sent_at, gmail_enabled)
+        if not ok:
+            return False, detail
+
     if "/apply/email" in page.url:
-        return False, f"still on the email step: {await _errors(page)}"
+        # An empty reason here is useless: the step refused to advance and
+        # said nothing a selector could find. Report what the page actually
+        # shows so the next failure is diagnosable from the log alone.
+        detail = await _errors(page) or await _visible_text(page)
+        ticked = await page.locator(_TERMS).first.is_checked() \
+            if await page.locator(_TERMS).first.count() else None
+        return False, f"still on the email step (terms ticked={ticked}): {detail}"
     log.info("oracle.past_email_gate", url=page.url[-60:])
     return True, page.url
 
@@ -144,6 +201,23 @@ async def _errors(page: Any) -> str:
     except with_suppressed:
         return ""
     return " | ".join(e.strip() for e in errs if e.strip())[:160]
+
+
+async def _wants_code(page: Any) -> bool:
+    with_suppressed = (Exception,)
+    try:
+        return "confirm your identity" in (await page.inner_text("body")).lower()
+    except with_suppressed:
+        return False
+
+
+async def _visible_text(page: Any) -> str:
+    with_suppressed = (Exception,)
+    try:
+        body = await page.inner_text("body")
+    except with_suppressed:
+        return "(page text unavailable)"
+    return " ".join(body.split())[:220]
 
 
 def _step_of(url: str) -> str:
