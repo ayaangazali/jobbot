@@ -369,18 +369,28 @@ async def ensure_account(
 
 
 async def advance(page: Any) -> tuple[bool, str]:
-    """Move to the next wizard step. Returns (moved, step_label)."""
-    before = page.url
-    label = await _text(page, "[data-automation-id='progressBarActiveStep']")
-    moved = await _click_first(page, [A["next"], "button:has-text('Save and Continue')",
-                                      "button:has-text('Continue')", "button:has-text('Next')"])
-    if moved:
-        await cap.settle(page, quiet_ms=1200)
-        errs = await _text(page, A["error"])
-        if errs:
-            return False, f"validation: {errs[:160]}"
-        return page.url != before or True, label
-    return False, label
+    """Move to the next wizard step. Returns (moved, step_label).
+
+    "Moved" has to mean moved. This used to end in `page.url != before or True`
+    -- always True -- so a page that refused to advance reported success, and
+    the caller walked the same step until it ran out of tries.
+    """
+    before_url = page.url
+    before_step = await _text(page, "[data-automation-id='progressBarActiveStep']")
+    clicked = await _click_first(page, [A["next"], "button:has-text('Save and Continue')",
+                                        "button:has-text('Continue')", "button:has-text('Next')"])
+    if not clicked:
+        return False, before_step
+
+    await cap.settle(page, quiet_ms=1200)
+    errs = await _text(page, A["error"])
+    if errs:
+        return False, f"validation: {errs[:160]}"
+
+    after_step = await _text(page, "[data-automation-id='progressBarActiveStep']")
+    if page.url != before_url or (after_step and after_step != before_step):
+        return True, after_step or before_step
+    return False, f"still on {before_step or 'the same step'}"
 
 
 async def is_final_step(page: Any) -> bool:
