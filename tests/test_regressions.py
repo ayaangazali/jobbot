@@ -590,3 +590,21 @@ def test_a_graduation_field_is_answered_from_the_profile(profile: Profile) -> No
     assert answer("Expected Graduation Year", FieldKind.DATE) == end.isoformat()
     # "Are you a recent graduate?" is a yes/no, not a date.
     assert answer("Are you a recent graduate?", FieldKind.RADIO) != end.isoformat()
+
+
+def test_a_smartrecruiters_posting_points_at_its_application_form() -> None:
+    """The posting URL renders the advert with no Apply button anywhere, which
+    was recorded as "no answerable fields found" on two live AbbVie
+    internships. The board's own redirect to the form is ?oga=true."""
+    from jobbot.discovery.sources import smartrecruiters_apply_url as apply_url
+
+    assert apply_url("https://jobs.smartrecruiters.com/AbbVie/3743990014860306") == \
+        "https://jobs.smartrecruiters.com/AbbVie/3743990014860306?oga=true"
+    # An existing query string is kept, and the suffix is never doubled.
+    assert apply_url("https://jobs.smartrecruiters.com/AbbVie/374?src=x") == \
+        "https://jobs.smartrecruiters.com/AbbVie/374?src=x&oga=true"
+    assert apply_url("https://jobs.smartrecruiters.com/AbbVie/374?oga=true") == \
+        "https://jobs.smartrecruiters.com/AbbVie/374?oga=true"
+    # Another board's URL is left exactly as it is.
+    assert apply_url("https://boards.greenhouse.io/x/jobs/1") == \
+        "https://boards.greenhouse.io/x/jobs/1"

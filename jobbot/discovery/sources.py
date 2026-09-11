@@ -138,6 +138,21 @@ def ashby_apply_url(url: str) -> str:
     return f"{base.rstrip('/')}/application" + (sep + query if sep else "")
 
 
+def smartrecruiters_apply_url(url: str) -> str:
+    """The application form, not the job description.
+
+    A SmartRecruiters posting URL renders the advert with no Apply button at
+    all, which read here as "no answerable fields found" and failed two live
+    AbbVie internships. `?oga=true` is the board's own redirect to the
+    one-click application form.
+    """
+    url = (url or "").strip()
+    if "jobs.smartrecruiters.com" not in url or "oga=true" in url:
+        return url
+    base, sep, query = url.partition("?")
+    return f"{base}?{query}&oga=true" if sep and query else f"{base}?oga=true"
+
+
 def _ashby_apply_url(j: dict[str, Any]) -> str:
     return ashby_apply_url(j.get("applyUrl") or j.get("jobUrl") or "")
 
@@ -247,7 +262,8 @@ class Discovery:
                 continue
             if (j.get("category") or "Software") not in _INTERN_CATEGORIES:
                 continue
-            link = workday_en_url(ashby_apply_url(j.get("url") or ""))
+            link = smartrecruiters_apply_url(
+                workday_en_url(ashby_apply_url(j.get("url") or "")))
             if not link:
                 continue
             posted = _from_epoch(j.get("date_posted") or j.get("date_updated"))
@@ -388,7 +404,8 @@ class Discovery:
             out.append(JobPost(
                 ats=ATS.SMARTRECRUITERS, native_id=str(j.get("id")), company=slug,
                 title=j.get("name", ""),
-                url=f"https://jobs.smartrecruiters.com/{slug}/{j.get('id')}",
+                url=smartrecruiters_apply_url(
+                    f"https://jobs.smartrecruiters.com/{slug}/{j.get('id')}"),
                 location=loctxt, remote=bool(loc.get("remote")),
                 department=(j.get("department") or {}).get("label", ""),
                 posted_at=_parse_dt(j.get("releasedDate")), raw=j,
