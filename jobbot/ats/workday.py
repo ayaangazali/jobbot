@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -100,6 +101,20 @@ async def _live(page: Any, sel: str, timeout: int = 8000) -> Any:
             if await cand.is_visible() and await cand.is_enabled():
                 return cand
     return loc.first
+
+
+def _plus_address(email: str, tenant: str) -> str:
+    """A per-tenant alias of the same mailbox: ayaan+blueorigin@gmail.com.
+
+    Gmail delivers it to the same inbox, so the employer can still reach the
+    candidate, and it lets a fresh account be registered where the old one is
+    unreachable. Already-aliased addresses are left alone.
+    """
+    local, _, domain = (email or "").partition("@")
+    if not domain or "+" in local:
+        return email
+    suffix = re.sub(r"[^a-z0-9]", "", tenant.lower())[:20]
+    return f"{local}+{suffix}@{domain}" if suffix else email
 
 
 async def _submit(page: Any, sel: str, fallback_text: str) -> None:
@@ -241,8 +256,22 @@ async def ensure_account(
     if existing:
         log.info("workday.signing_in", tenant=tenant, username=existing.username)
         ok, err = await _sign_in(page, existing.username, existing.password)
-        return AccountResult(created=False, signed_in=ok,
-                             username=existing.username, error=err)
+        if ok:
+            return AccountResult(created=False, signed_in=True,
+                                 username=existing.username)
+        # The account exists on the employer's site and the password we hold
+        # does not open it -- which is what a run looks like after the keychain
+        # refused to store one. Rather than stop here forever, register again
+        # under a plus-address of the same inbox: same person, same mail, an
+        # address the candidate controls and can be replied to.
+        alias = _plus_address(email, tenant)
+        if alias != existing.username:
+            log.warning("workday.locked_out_registering_again", tenant=tenant,
+                        was=existing.username, now=alias, error=err[:100])
+            email = alias
+        else:
+            return AccountResult(created=False, signed_in=False,
+                                 username=existing.username, error=err)
 
     # No account yet -- create one.
     password = vault.generate_password()
