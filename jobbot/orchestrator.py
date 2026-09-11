@@ -38,6 +38,7 @@ from typing import Any
 import structlog
 
 from jobbot.ats import credentials as vault
+from jobbot.ats import oracle as orc
 from jobbot.ats import workday as wd
 from jobbot.ats.detect import ATS, REQUIRES_ACCOUNT, detect
 from jobbot.browser import capture as cap
@@ -507,6 +508,18 @@ class Orchestrator:
         det = detect(page.url, None)
         log.info("apply.start", job_id=jid, ats=det.ats.value, company=post.company)
 
+        # Oracle puts an email address and a terms checkbox between the
+        # posting and the form. It is not an account wall -- no password, no
+        # verification code -- so it is handled here rather than below.
+        if det.ats is ATS.ORACLE:
+            ok, detail = await orc.start_application(
+                page, self.profile.identity.email_str)
+            if not ok:
+                self.tracker.update(jid, status=Status.UNREACHABLE.value,
+                                    error=detail[:250])
+                return ApplicationResult(jid, Status.UNREACHABLE.value,
+                                         f"oracle gate: {detail}")
+
         # --- account wall (Workday and friends) --------------------------
         if det.ats in REQUIRES_ACCOUNT:
             if det.ats is ATS.WORKDAY:
@@ -765,12 +778,13 @@ class Orchestrator:
         # exists on the last one. wd.advance() and wd.is_final_step() have been
         # in the adapter all along with nothing calling them, which is why no
         # Workday application has ever completed.
-        if det.ats is ATS.WORKDAY:
+        wizard = {ATS.WORKDAY: wd, ATS.ORACLE: orc}.get(det.ats)
+        if wizard is not None:
             for step in range(1, MAX_WIZARD_STEPS + 1):
-                if await wd.is_final_step(page):
+                if await wizard.is_final_step(page):
                     log.info("apply.wizard_final_step", job_id=jid, step=step)
                     break
-                moved, label = await wd.advance(page)
+                moved, label = await wizard.advance(page)
                 if not moved:
                     log.info("apply.wizard_stuck", job_id=jid, step=step,
                              detail=label[:80])

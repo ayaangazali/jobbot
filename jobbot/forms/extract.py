@@ -121,6 +121,10 @@ _EXTRACT_JS = r"""
     const tag = el.tagName.toLowerCase();
     const type = (el.getAttribute('type') || '').toLowerCase();
     if (type === 'hidden' || type === 'submit' || type === 'button' || type === 'reset') continue;
+    // A honeypot is a field only a bot can see, and filling it is the tell
+    // that marks the application as automated. Oracle's is called
+    // "honey-pot-1" and sits in the middle of the real fields.
+    if (/honey[\s_-]?pot/i.test((el.id || '') + ' ' + (el.name || '') + ' ' + (el.className || ''))) continue;
     if (!vis(el)) continue;
 
     let kind = 'text';
