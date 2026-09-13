@@ -9,7 +9,9 @@ open-source applier in this space stores the user's password today.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import secrets
 import string
 from dataclasses import dataclass
@@ -52,15 +54,49 @@ def _key(ats: str, tenant: str) -> str:
     return f"{ats}:{tenant}".lower()
 
 
+# When the OS keychain refuses the write, secrets go here instead: the
+# candidate's own home directory, mode 0600, alongside the .env and the Gmail
+# token that already live there. macOS returned -61 (a write-permission error)
+# for every account this run tried to create, and without somewhere to put the
+# password the account is created and then lost -- locking the candidate out of
+# that employer's site with no way back in.
+FALLBACK_PATH = Path.home() / ".jobbot" / "credentials.json"
+
+
+def _fallback_read() -> dict[str, dict]:
+    if not FALLBACK_PATH.exists():
+        return {}
+    try:
+        return json.loads(FALLBACK_PATH.read_text(encoding="utf-8") or "{}")
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _fallback_write(key: str, payload: dict) -> None:
+    FALLBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    data = _fallback_read()
+    data[key] = payload
+    # Create with 0600 from the start rather than widening then narrowing.
+    fd = os.open(FALLBACK_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, sort_keys=True)
+    os.chmod(FALLBACK_PATH, 0o600)
+
+
 def save(ats: str, tenant: str, username: str, password: str) -> Credential:
     import keyring
 
     k = _key(ats, tenant)
     cred = Credential(tenant=tenant, username=username, password=password,
                       created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    keyring.set_password(SERVICE, k, json.dumps({
-        "username": username, "password": password, "created_at": cred.created_at,
-    }))
+    payload = {"username": username, "password": password,
+               "created_at": cred.created_at}
+    try:
+        keyring.set_password(SERVICE, k, json.dumps(payload))
+    except Exception as exc:  # noqa: BLE001
+        _fallback_write(k, payload)
+        log.warning("credentials.keychain_unavailable", error=str(exc)[:120],
+                    stored_in=str(FALLBACK_PATH), mode="0600")
 
     # An index of WHICH tenants exist (never the secrets) so a run can tell at a
     # glance whether it already has an account somewhere.
@@ -68,11 +104,11 @@ def save(ats: str, tenant: str, username: str, password: str) -> Credential:
     idx = {}
     if INDEX_PATH.exists():
         try:
-            idx = json.loads(INDEX_PATH.read_text())
+            idx = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             idx = {}
     idx[k] = {"username": username, "created_at": cred.created_at}
-    INDEX_PATH.write_text(json.dumps(idx, indent=2, sort_keys=True))
+    INDEX_PATH.write_text(json.dumps(idx, indent=2, sort_keys=True), encoding="utf-8")
 
     log.info("credentials.saved", ats=ats, tenant=tenant, username=username)
     return cred
@@ -81,10 +117,16 @@ def save(ats: str, tenant: str, username: str, password: str) -> Credential:
 def load(ats: str, tenant: str) -> Credential | None:
     import keyring
 
-    raw = keyring.get_password(SERVICE, _key(ats, tenant))
-    if not raw:
-        return None
-    d = json.loads(raw)
+    k = _key(ats, tenant)
+    raw = None
+    with contextlib.suppress(Exception):
+        raw = keyring.get_password(SERVICE, k)
+    if raw:
+        d = json.loads(raw)
+    else:
+        d = _fallback_read().get(k)
+        if not d:
+            return None
     return Credential(tenant=tenant, username=d["username"], password=d["password"],
                       created_at=d.get("created_at", ""))
 
@@ -96,7 +138,7 @@ def have(ats: str, tenant: str) -> bool:
 def list_tenants() -> dict[str, dict]:
     if INDEX_PATH.exists():
         try:
-            return json.loads(INDEX_PATH.read_text())
+            return json.loads(INDEX_PATH.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             return {}
     return {}

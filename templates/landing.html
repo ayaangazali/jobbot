@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>jobbot — GET HIRED NOW</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo+Black&family=Permanent+Marker&display=swap" rel="stylesheet">
+    <style>
+        /* =========================================================
+           MAXIMALIST SPRAY-PAINT SYSTEM
+           Fonts: Anton (display), Permanent Marker (marker accent),
+                  Archivo Black (heavy sans body/labels).
+           No CSS gradients anywhere — texture comes from inline SVG
+           filters (feTurbulence + feDisplacementMap for wobble edges,
+           feTurbulence + feColorMatrix for speckle grain), solid-hue
+           halos, jittered clip-path stencils and SVG drip strokes.
+           ========================================================= */
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --pink: #ff006e;
+            --cyan: #00d9ff;
+            --gold: #ffbe0b;
+            --orange: #ff4500;
+            --lime: #00ff41;
+            --purple: #9d4edd;
+            --blue: #3a86ff;
+            --bg: #0a0a0a;
+            --white: #ffffff;
+            --chip: rgba(10, 10, 10, 0.93);
+        }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            background: var(--bg);
+            color: var(--white);
+            font-family: 'Archivo Black', 'Anton', sans-serif;
+            line-height: 1;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        img, svg { display: block; max-width: 100%; }
+
+        /* ===== FONT ROLES =====
+           .f-display  -> Anton            (hero / section titles, huge poster type)
+           .f-marker   -> Permanent Marker (tape labels, scribbles, hand marks)
+           default     -> Archivo Black    (heavy sans: body copy, labels, nav) */
+        .f-display { font-family: 'Anton', 'Impact', sans-serif; }
+        .f-marker  { font-family: 'Permanent Marker', cursive; }
+
+        /* ===== AMBIENT BACKGROUND (solid blurred blobs, NOT gradients) ===== */
+
+        .ambient {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            pointer-events: none;
+            overflow: hidden;
+        }
+
+        .ambient .paint-blob { opacity: .16; }
+        .ambient .paint-blob .speck,
+        .ambient .paint-blob .drip { display: none; }
+
+        .amb-1 { width: 560px; height: 560px; top: -120px; left: -140px; }
+        .amb-2 { width: 480px; height: 480px; top: 40%; right: -180px; }
+        .amb-3 { width: 440px; height: 440px; bottom: -160px; left: 30%; }
+
+        /* =====================================================
+           PAINT-BLOB COMPONENT — 3 sub-layers per blob:
+           .halo  = blurred oversized duplicate, low opacity (overspray)
+           .fill  = solid hue, feDisplacementMap wobble edge, clip-path stencil cut
+           .speck = feTurbulence speckle grain, blend-multiply on top
+           ===================================================== */
+
+        .paint-blob { position: absolute; }
+
+        .paint-blob .halo {
+            position: absolute;
+            inset: -14%;
+            background-color: var(--hue);
+            filter: blur(22px);
+            opacity: .38;
+            border-radius: 38%;
+            z-index: 1;
+        }
+
+        .paint-blob .fill {
+            position: absolute;
+            inset: 0;
+            background-color: var(--hue);
+            filter: url(#sprayEdgeA);
+            z-index: 2;
+        }
+
+        .paint-blob.edge-b .fill,
+        .paint-blob.edge-b .speck { filter: url(#sprayEdgeB); }
+
+        .paint-blob .speck {
+            position: absolute;
+            inset: 0;
+            background-color: #000;
+            filter: url(#spraySpeckle);
+            mix-blend-mode: overlay;
+            opacity: .55;
+            z-index: 3;
+        }
+
+        .paint-blob .drip {
+            position: absolute;
+            left: 10%;
+            bottom: -40px;
+            width: 74%;
+            height: 52px;
+            color: var(--hue);
+            z-index: 2;
+        }
+
+        /* jittered stencil-cut clip shapes */
+        .stencil-1 { clip-path: polygon(8% 0%, 35% 4%, 62% 0%, 88% 6%, 100% 22%, 96% 48%, 100% 74%, 90% 96%, 66% 100%, 40% 94%, 14% 100%, 2% 78%, 6% 50%, 0% 24%); }
+        .stencil-2 { clip-path: polygon(4% 10%, 22% 0%, 48% 5%, 74% 0%, 96% 12%, 100% 38%, 94% 60%, 100% 84%, 80% 100%, 54% 94%, 30% 100%, 6% 90%, 0% 64%, 8% 40%); }
+        .stencil-3 { clip-path: polygon(0% 18%, 18% 2%, 44% 8%, 70% 0%, 92% 10%, 100% 34%, 92% 56%, 100% 80%, 86% 98%, 60% 92%, 36% 100%, 10% 96%, 2% 70%, 8% 44%); }
+        .stencil-4 { clip-path: polygon(6% 4%, 32% 0%, 58% 6%, 84% 0%, 100% 20%, 92% 44%, 100% 68%, 94% 92%, 70% 100%, 44% 94%, 18% 100%, 0% 82%, 4% 56%, 0% 30%); }
+
+        /* ===== TAPE / STICKER / MARKER-SCRIBBLE (top decoration layer) ===== */
+
+        .tape {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.88);
+            color: var(--bg);
+            border: 2px dashed rgba(10, 10, 10, 0.35);
+            padding: 6px 16px;
+            font-size: 15px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            box-shadow: 0 4px 0 rgba(0, 0, 0, 0.25);
+            z-index: 6;
+            white-space: nowrap;
+        }
+
+        .sticker {
+            position: absolute;
+            width: 58px;
+            height: 58px;
+            min-width: 48px;
+            min-height: 48px;
+            border-radius: 50%;
+            background: var(--bg);
+            border: 3px solid var(--white);
+            color: var(--sticker-color, var(--gold));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Anton', sans-serif;
+            font-size: 18px;
+            z-index: 7;
+            box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.4);
+        }
+
+        .scribble { display: block; width: min(360px, 64%); height: 34px; margin-top: 8px; }
+        .scribble path { fill: none; stroke: var(--pink); stroke-width: 8; stroke-linecap: round; }
+
+        /* ===== SECTION BLEED BLOBS (shape poking up from section N into N-1) ===== */
+
+        .bleed {
+            position: absolute;
+            z-index: 1;
+            opacity: .68;
+        }
+        .bleed-top { top: -40px; }
+
+        /* ===== HEADER ===== */
+
+        header {
+            padding: 24px 40px;
+            position: relative;
+            z-index: 10;
+            border-bottom: 6px dashed var(--pink);
+            background: var(--bg);
+        }
+
+        .logo {
+            font-size: 52px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            color: var(--pink);
+            font-family: 'Anton', sans-serif;
+            text-shadow: 4px 4px 0 var(--cyan), 8px 8px 0 var(--orange);
+            display: inline-block;
+        }
+
+        /* ===== HERO ===== */
+
+        .hero {
+            padding: 48px 40px 40px;
+            position: relative;
+            min-height: 620px;
+            display: flex;
+            align-items: center;
+        }
+
+        .hero-clip { position: absolute; inset: 0; overflow: hidden; z-index: 0; }
+
+        /* 4 full-opacity overlapping paint blobs — colors dominate, black only in gaps */
+        .hero-blob-1 { width: 720px; height: 720px; top: -170px; left: -130px; }
+        .hero-blob-2 { width: 640px; height: 640px; top: -110px; right: -90px; }
+        .hero-blob-3 { width: 620px; height: 620px; bottom: -170px; left: 10%; }
+        .hero-blob-4 { width: 560px; height: 560px; bottom: -150px; right: -70px; }
+
+        .hero-content {
+            position: relative;
+            z-index: 5;
+            max-width: 920px;
+        }
+
+        .hero h1 {
+            font-family: 'Anton', 'Impact', sans-serif;
+            font-size: clamp(84px, 10.5vw, 150px);
+            line-height: 0.85;
+            text-transform: uppercase;
+            margin-bottom: 22px;
+            letter-spacing: -3px;
+        }
+
+        .hero h1 span {
+            display: block;
+            -webkit-text-stroke: 3px var(--bg);
+            paint-order: stroke fill;
+        }
+        .hero h1 .word1 { color: var(--pink); text-shadow: 6px 6px 0 var(--cyan), 12px 12px 0 var(--orange); }
+        .hero h1 .word2 { color: var(--gold); text-shadow: 6px 6px 0 var(--pink), 12px 12px 0 var(--cyan); }
+        .hero h1 .word3 { color: var(--cyan); text-shadow: 6px 6px 0 var(--gold), 12px 12px 0 var(--pink); }
+
+        .hero p {
+            font-size: 24px;
+            color: var(--white);
+            margin-bottom: 28px;
+            line-height: 1.3;
+            max-width: 640px;
+            font-family: 'Archivo Black', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: inline-block;
+            background: var(--chip);
+            border-left: 6px solid var(--gold);
+            padding: 16px 22px;
+        }
+
+        .cta-group { display: flex; gap: 25px; flex-wrap: wrap; position: relative; z-index: 5; }
+
+        .btn {
+            padding: 24px 44px;
+            min-height: 48px;
+            font-size: 22px;
+            font-family: 'Anton', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            border: none;
+            cursor: pointer;
+            position: relative;
+            transform: skew(-8deg);
+            transition: transform 150ms ease-out, box-shadow 150ms ease-out;
+        }
+
+        .btn.primary {
+            background: var(--pink);
+            color: var(--bg);
+            box-shadow: 0 12px 0 rgba(0, 0, 0, 0.4), -6px -6px 0 var(--cyan);
+        }
+        .btn.primary:hover { transform: skew(-8deg) translate(-3px, -3px); box-shadow: 0 16px 0 rgba(0, 0, 0, 0.4), -6px -6px 0 var(--cyan); }
+
+        .btn.secondary {
+            background: var(--cyan);
+            color: var(--bg);
+            box-shadow: 0 12px 0 rgba(0, 0, 0, 0.4), 6px 6px 0 var(--gold);
+        }
+        .btn.secondary:hover { transform: skew(-8deg) translate(3px, -3px); box-shadow: 0 16px 0 rgba(0, 0, 0, 0.4), 6px 6px 0 var(--gold); }
+
+        .hero .tape { top: 24px; right: 6%; transform: rotate(6deg); }
+        .hero .sticker { bottom: 6%; right: 12%; transform: rotate(-10deg); }
+
+        /* ===== TICKER MARQUEE ===== */
+
+        .ticker {
+            overflow: hidden;
+            background: var(--bg);
+            border-top: 4px dashed var(--gold);
+            border-bottom: 4px dashed var(--cyan);
+            padding: 18px 0;
+            position: relative;
+            z-index: 4;
+        }
+        .ticker-track {
+            display: flex;
+            width: max-content;
+            gap: 60px;
+            animation: tickerScroll 26s linear infinite;
+        }
+        .ticker-track span {
+            font-family: 'Anton', sans-serif;
+            font-size: 28px;
+            letter-spacing: 2px;
+            color: var(--gold);
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .ticker-track span:nth-child(even) { color: var(--cyan); }
+        @keyframes tickerScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        @media (prefers-reduced-motion: reduce) { .ticker-track { animation-play-state: paused; } }
+
+        /* ===== FEATURES ===== */
+
+        .features-section { padding: 140px 40px 120px; position: relative; background: var(--bg); }
+
+        .section-title {
+            font-family: 'Anton', sans-serif;
+            font-size: clamp(64px, 9vw, 140px);
+            text-transform: uppercase;
+            margin-bottom: 30px;
+            color: var(--gold);
+            text-shadow: 6px 6px 0 var(--pink), 12px 12px 0 var(--cyan);
+            letter-spacing: -3px;
+            position: relative;
+            z-index: 2;
+        }
+        .section-title-wrap { margin-bottom: 80px; position: relative; z-index: 2; }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 60px 40px;
+            position: relative;
+            z-index: 2;
+        }
+        @media (max-width: 1100px) {
+            .features-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        .feature-card {
+            position: relative;
+            min-height: 360px;
+            padding: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .feature-card .paint-blob { inset: 0; }
+
+        .card-chip {
+            position: relative;
+            z-index: 5;
+            background: var(--chip);
+            border: 3px solid var(--accent, var(--cyan));
+            padding: 40px 34px;
+            width: 100%;
+            box-shadow: 10px 10px 0 rgba(0, 0, 0, 0.5);
+            transition: transform 180ms ease-out;
+        }
+
+        .feature-card:hover .card-chip { transform: translate(-6px, -10px); }
+        .feature-card:hover .paint-blob { filter: brightness(1.05); }
+
+        .card-chip .icon-stencil { width: 64px; height: 64px; margin-bottom: 16px; color: var(--chiptext, var(--white)); filter: drop-shadow(3px 3px 0 rgba(0, 0, 0, 0.5)); }
+
+        .card-chip h3 {
+            font-family: 'Anton', sans-serif;
+            font-size: 42px;
+            text-transform: uppercase;
+            margin-bottom: 16px;
+            letter-spacing: 0.5px;
+            color: var(--chiptext, var(--cyan));
+        }
+
+        .card-chip p {
+            font-size: 24px;
+            line-height: 1.35;
+            font-family: 'Archivo Black', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.2px;
+            color: var(--white);
+        }
+
+        .feature-card .tape { top: -14px; left: 24px; transform: rotate(-5deg); }
+        .feature-card .sticker { top: -20px; right: 8px; }
+
+        /* ===== STATS ===== */
+
+        .stats-section {
+            padding: 120px 40px;
+            position: relative;
+            background: var(--bg);
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 60px;
+            z-index: 2;
+        }
+
+        .stat-box {
+            position: relative;
+            padding: 50px;
+            border: 7px dashed;
+            transition: transform 150ms ease-out;
+        }
+
+        .stat-box .paint-blob { inset: -18px; z-index: 0; opacity: .5; }
+        .stat-box .stat-inner { position: relative; z-index: 3; }
+
+        .stat-box:nth-child(1) { border-color: var(--pink); }
+        .stat-box:nth-child(2) { border-color: var(--gold); }
+        .stat-box:nth-child(3) { border-color: var(--cyan); }
+        .stat-box:hover { transform: translate(0, -14px); }
+
+        .stat-number {
+            font-family: 'Anton', sans-serif;
+            font-size: 84px;
+            color: var(--pink);
+            text-shadow: 3px 3px 0 var(--cyan);
+        }
+        .stat-label {
+            font-size: 20px;
+            text-transform: uppercase;
+            margin-top: 14px;
+            letter-spacing: 1px;
+            color: var(--gold);
+            font-family: 'Archivo Black', sans-serif;
+        }
+        .stat-box .sticker { top: -22px; right: -14px; width: 48px; height: 48px; font-size: 22px; }
+
+        /* ===== HOW IT WORKS ===== */
+
+        .steps-section { padding: 140px 40px 120px; background: var(--bg); position: relative; z-index: 2; }
+
+        .steps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 60px 40px; }
+
+        .step { position: relative; min-height: 300px; padding: 20px; }
+        .step .paint-blob { inset: 0; }
+
+        .step-inner {
+            position: relative;
+            z-index: 5;
+            background: var(--chip);
+            border: 3px solid var(--accent, var(--gold));
+            padding: 40px 30px 30px;
+            box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.5);
+            height: 100%;
+        }
+
+        .step-number {
+            font-family: 'Anton', sans-serif;
+            font-size: 96px;
+            color: var(--white);
+            opacity: 0.14;
+            position: absolute;
+            top: -14px;
+            right: 10px;
+        }
+
+        .step h4 {
+            font-family: 'Anton', sans-serif;
+            font-size: 40px;
+            text-transform: uppercase;
+            margin-bottom: 16px;
+            color: var(--chiptext, var(--gold));
+            position: relative;
+            z-index: 2;
+        }
+
+        .step p {
+            font-size: 22px;
+            color: var(--white);
+            position: relative;
+            z-index: 2;
+            font-family: 'Archivo Black', sans-serif;
+            text-transform: uppercase;
+            line-height: 1.35;
+        }
+
+        .step .tape { bottom: -14px; left: 20px; transform: rotate(4deg); }
+
+        /* ===== CTA ===== */
+
+        .cta-section { padding: 160px 40px; text-align: center; position: relative; background: var(--bg); z-index: 2; }
+
+        .cta-clip { position: absolute; inset: 0; overflow: hidden; z-index: 0; }
+
+        .cta-blob { width: 900px; height: 640px; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+
+        .cta-inner { position: relative; z-index: 5; display: inline-block; }
+
+        .cta-section h2 {
+            font-family: 'Anton', sans-serif;
+            font-size: clamp(64px, 12vw, 140px);
+            text-transform: uppercase;
+            margin-bottom: 20px;
+            color: var(--pink);
+            text-shadow: 8px 8px 0 var(--cyan), 16px 16px 0 var(--gold);
+            letter-spacing: -3px;
+        }
+
+        .cta-section .scribble { margin: 0 auto 30px; }
+
+        .cta-button { font-size: 28px; padding: 32px 60px; margin-top: 10px; }
+        .cta-inner .tape { top: -30px; left: -40px; transform: rotate(-8deg); }
+        .cta-inner .sticker { bottom: -10px; right: -50px; }
+
+        /* ===== FOOTER ===== */
+
+        footer {
+            padding: 90px 40px 60px;
+            border-top: 7px dashed var(--cyan);
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 50px;
+            position: relative;
+            z-index: 2;
+            background: rgba(0, 0, 0, 0.85);
+        }
+
+        .footer-backdrop { position: absolute; inset: 0; overflow: hidden; z-index: 0; opacity: .45; pointer-events: none; }
+
+        .section-clip { position: absolute; inset: 0; overflow: hidden; z-index: 1; pointer-events: none; }
+
+        footer h5 {
+            font-size: 20px;
+            text-transform: uppercase;
+            margin-bottom: 20px;
+            color: var(--gold);
+            letter-spacing: 1px;
+            font-family: 'Archivo Black', sans-serif;
+        }
+
+        footer a {
+            color: var(--cyan);
+            text-decoration: none;
+            font-size: 18px;
+            display: block;
+            padding: 14px 0;
+            transition: transform 100ms ease-out, color 100ms ease-out;
+            text-transform: uppercase;
+            font-family: 'Archivo Black', sans-serif;
+        }
+        footer a:hover { color: var(--pink); transform: translateX(8px); }
+
+        .footer-bottom {
+            grid-column: 1 / -1;
+            border-top: 4px dotted var(--gold);
+            padding-top: 40px;
+            text-align: center;
+            color: var(--cyan);
+            font-size: 18px;
+            font-family: 'Archivo Black', sans-serif;
+        }
+        .footer-bottom .f-marker { color: var(--gold); font-size: 20px; }
+
+        /* ===== RESPONSIVE ===== */
+
+        @media (max-width: 768px) {
+            .hero { padding: 60px 20px 100px; min-height: auto; }
+            .hero h1 { font-size: clamp(48px, 14vw, 110px); letter-spacing: -2px; }
+            .hero p { font-size: 20px; }
+            .hero .tape, .cta-inner .tape, .cta-inner .sticker { display: none; }
+
+            .features-grid { grid-template-columns: 1fr; gap: 60px; }
+            .section-title { font-size: clamp(36px, 11vw, 72px); }
+
+            .card-chip { padding: 30px 24px; }
+            .card-chip h3 { font-size: 32px; }
+            .card-chip p { font-size: 20px; }
+
+            .stat-number { font-size: 52px; }
+            .step h4 { font-size: 28px; }
+            .step p { font-size: 18px; }
+            .cta-section h2 { font-size: 52px; }
+
+            .ticker-track span { font-size: 20px; }
+
+            footer { grid-template-columns: 1fr; }
+
+            .hero-blob-1 { width: 300px; height: 300px; top: -70px; left: -80px; }
+            .hero-blob-2 { width: 260px; height: 260px; top: -50px; right: -60px; }
+            .hero-blob-3 { width: 280px; height: 280px; bottom: -80px; left: 5%; }
+            .hero-blob-4 { width: 240px; height: 240px; bottom: -70px; right: -50px; }
+            .cta-blob { width: 420px; height: 340px; }
+        }
+    </style>
+</head>
+<body>
+    <!-- hidden SVG defs: spray-paint filters + reusable drip symbol -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+        <defs>
+            <filter id="sprayEdgeA" x="-15%" y="-15%" width="130%" height="130%">
+                <feTurbulence type="fractalNoise" baseFrequency="0.014 0.03" numOctaves="1" seed="4" result="n"/>
+                <feDisplacementMap in="SourceGraphic" in2="n" scale="30" xChannelSelector="R" yChannelSelector="G"/>
+            </filter>
+            <filter id="sprayEdgeB" x="-15%" y="-15%" width="130%" height="130%">
+                <feTurbulence type="fractalNoise" baseFrequency="0.02 0.045" numOctaves="1" seed="17" result="n"/>
+                <feDisplacementMap in="SourceGraphic" in2="n" scale="40" xChannelSelector="R" yChannelSelector="G"/>
+            </filter>
+            <filter id="spraySpeckle" x="-5%" y="-5%" width="110%" height="110%">
+                <feTurbulence type="fractalNoise" baseFrequency="1.1" numOctaves="1" seed="9" result="n"/>
+                <feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 28 -25" result="a"/>
+                <feComposite in="a" in2="SourceGraphic" operator="in"/>
+            </filter>
+        </defs>
+        <symbol id="dripSet" viewBox="0 0 220 60">
+            <g fill="none" stroke="currentColor" stroke-linecap="round">
+                <path d="M14 0 V30" stroke-width="16"/>
+                <path d="M52 0 V48" stroke-width="10"/>
+                <path d="M92 0 V20" stroke-width="20"/>
+                <path d="M136 0 V40" stroke-width="9"/>
+                <path d="M172 0 V16" stroke-width="14"/>
+                <path d="M204 0 V32" stroke-width="8"/>
+            </g>
+        </symbol>
+        <symbol id="iconTarget" viewBox="0 0 64 64">
+            <path fill="currentColor" fill-rule="evenodd" d="M32 4a28 28 0 100 56 28 28 0 000-56zm0 9a19 19 0 110 38 19 19 0 010-38zm0 10a9 9 0 100 18 9 9 0 000-18z"/>
+        </symbol>
+        <symbol id="iconDoc" viewBox="0 0 64 64">
+            <path fill="currentColor" fill-rule="evenodd" d="M12 6h40a2 2 0 012 2v48a2 2 0 01-2 2H12a2 2 0 01-2-2V8a2 2 0 012-2zm6 18h28v5H18v-5zm0 10h28v5H18v-5zm0 10h20v5H18v-5z"/>
+        </symbol>
+        <symbol id="iconQuestion" viewBox="0 0 64 64">
+            <circle cx="32" cy="32" r="27" fill="none" stroke="currentColor" stroke-width="6"/>
+            <path d="M22 25a10 10 0 1115 9c-4 2.5-5 5-5 9" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="32" cy="49" r="4" fill="currentColor"/>
+        </symbol>
+        <symbol id="iconBolt" viewBox="0 0 64 64">
+            <path fill="currentColor" d="M38 2 12 36h15l-5 26 30-40H37l6-20z"/>
+        </symbol>
+        <symbol id="iconChart" viewBox="0 0 64 64">
+            <rect x="8" y="34" width="13" height="24" fill="currentColor"/>
+            <rect x="25" y="20" width="13" height="38" fill="currentColor"/>
+            <rect x="42" y="6" width="13" height="52" fill="currentColor"/>
+        </symbol>
+        <symbol id="iconDollar" viewBox="0 0 64 64">
+            <path d="M32 4v56" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+            <path d="M43 16c0-6-6-10-14-8-7 2-10 7-8 12 2 4 7 5 14 7 8 2 12 6 10 12-2 6-9 9-16 7-6-2-9-6-9-10" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+        </symbol>
+    </svg>
+
+    <!-- ambient back-plane wash (solid blurred blobs, no gradients) -->
+    <div class="ambient" aria-hidden="true">
+        <div class="paint-blob amb-1" style="--hue:var(--pink)"><span class="halo"></span><span class="fill stencil-1"></span></div>
+        <div class="paint-blob amb-2 edge-b" style="--hue:var(--blue)"><span class="halo"></span><span class="fill stencil-3"></span></div>
+        <div class="paint-blob amb-3" style="--hue:var(--orange)"><span class="halo"></span><span class="fill stencil-2"></span></div>
+    </div>
+
+    <!-- HEADER -->
+    <header>
+        <div class="logo">jobbot</div>
+    </header>
+
+    <!-- HERO SECTION -->
+    <section class="hero">
+        <div class="hero-clip" aria-hidden="true">
+            <div class="paint-blob hero-blob-1 parallax edge-b" data-speed="0.1" style="--hue:var(--pink)">
+                <span class="halo"></span><span class="fill stencil-3"></span><span class="speck stencil-3"></span>
+            </div>
+            <div class="paint-blob hero-blob-2 parallax" data-speed="0.08" style="--hue:var(--cyan)">
+                <span class="halo"></span><span class="fill stencil-2"></span><span class="speck stencil-2"></span>
+            </div>
+            <div class="paint-blob hero-blob-3 parallax edge-b" data-speed="0.07" style="--hue:var(--gold)">
+                <span class="halo"></span><span class="fill stencil-4"></span><span class="speck stencil-4"></span>
+                <svg class="drip" viewBox="0 0 220 60"><use href="#dripSet"/></svg>
+            </div>
+            <div class="paint-blob hero-blob-4 parallax" data-speed="0.11" style="--hue:var(--lime)">
+                <span class="halo"></span><span class="fill stencil-1"></span><span class="speck stencil-1"></span>
+            </div>
+        </div>
+
+        <span class="tape f-marker">100% Free to Start</span>
+        <span class="sticker" style="--sticker-color:var(--lime)">NEW</span>
+
+        <div class="hero-content">
+            <h1>
+                <span class="word1">GET</span>
+                <span class="word2">HIRED</span>
+                <span class="word3">NOW</span>
+            </h1>
+            <p>Automate 50 job apps. Custom resume. Answered questions. Win more interviews.</p>
+            <div class="cta-group">
+                <button class="btn primary">Start Free</button>
+                <button class="btn secondary">Watch Demo</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- TICKER -->
+    <div class="ticker">
+        <div class="ticker-track">
+            <span>★ 47K+ APPS SUBMITTED</span>
+            <span>★ 34% MORE INTERVIEWS</span>
+            <span>★ CUSTOM RESUME EVERY TIME</span>
+            <span>★ ANSWER ONCE, REUSE FOREVER</span>
+            <span>★ 47K+ APPS SUBMITTED</span>
+            <span>★ 34% MORE INTERVIEWS</span>
+            <span>★ CUSTOM RESUME EVERY TIME</span>
+            <span>★ ANSWER ONCE, REUSE FOREVER</span>
+        </div>
+    </div>
+
+    <!-- FEATURES SECTION -->
+    <section class="features-section">
+        <div class="paint-blob bleed bleed-top parallax" data-speed="0.1" style="--hue:var(--gold); width:150px; height:150px; left:6%;" aria-hidden="true">
+            <span class="halo"></span><span class="fill stencil-4"></span><span class="speck stencil-4"></span>
+        </div>
+
+        <div class="section-clip" aria-hidden="true">
+            <div class="paint-blob" style="--hue:var(--gold); width:520px; height:420px; top:-40px; left:-100px;">
+                <span class="halo"></span><span class="fill stencil-1"></span><span class="speck stencil-1"></span>
+            </div>
+            <div class="paint-blob edge-b" style="--hue:var(--cyan); width:480px; height:400px; top:0; right:-60px;">
+                <span class="halo"></span><span class="fill stencil-3"></span><span class="speck stencil-3"></span>
+            </div>
+        </div>
+
+        <div class="section-title-wrap">
+            <h2 class="section-title">FEATURES</h2>
+            <svg class="scribble" viewBox="0 0 300 40" aria-hidden="true"><path d="M5 25 Q40 5 80 22 T160 18 T240 26 T295 15"/></svg>
+        </div>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="paint-blob" style="--hue:var(--pink)" aria-hidden="true">
+                    <span class="halo"></span><span class="fill stencil-1"></span><span class="speck stencil-1"></span>
+                    <svg class="drip" viewBox="0 0 220 60"><use href="#dripSet"/></svg>
+                </div>
+                <span class="tape f-marker">Fresh</span>
+                <span class="sticker" style="--sticker-color:var(--pink)">01</span>
+                <div class="card-chip" style="--accent:var(--cyan); --chiptext:var(--cyan)">
+                    <svg class="icon-stencil" viewBox="0 0 64 64" aria-hidden="true"><use href="#iconTarget"/></svg>
+                    <h3>Smart Filter</h3>
+                    <p>Skip trash. Target companies that match you.</p>
+                </div>
+            </div>
+
+            <div class="feature-card">
+                <div class="paint-blob edge-b" style="--hue:var(--cyan)" aria-hidden="true">
+                    <span class="halo"></span><span class="fill stencil-2"></span><span class="speck stencil-2"></span>
+                    <svg class="drip" viewBox="0 0 220 60"><use href="#dripSet"/></svg>
+                </div>
+                <span class="tape f-marker">Fast</span>
+                <span class="sticker" style="--sticker-color:var(--orange)">02</span>
+                <div class="card-chip" style="--accent:var(--orange); --chiptext:var(--pink)">
+                    <svg class="icon-stencil" viewBox="0 0 64 64" aria-hidden="true"><use href="#iconDoc"/></svg>
+                    <h3>Auto Resume</h3>
+                    <p>Custom per job. ATS optimized. Instant.</p>
+                </div>
+            </div>
+
+            <div class="feature-card">
+                <div class="paint-blob" style="--hue:var(--purple)" aria-hidden="true">
+                    <span class="halo"></span><span class="fill stencil-3"></span><span class="speck stencil-3"></span>
+                    <svg class="drip" viewBox="0 0 220 60"><use href="#dripSet"/></svg>
+                </div>
+                <span class="tape f-marker">Smart</span>
+                <span class="sticker" style="--sticker-color:var(--lime)">03</span>
+                <div class="card-chip" style="--accent:var(--lime); --chiptext:var(--gold)">
+                    <svg class="icon-stencil" viewBox="0 0 64 64" aria-hidden="true"><use href="#iconQuestion"/></svg>
+                    <h3>Questions</h3>
+                    <p>Answer once. Reuse forever. Done.</p>
+                </div>
+            </div>
+
+            <div class="feature-card">
+                <div class="paint-blob edge-b" style="--hue:var(--blue)" aria-hidden="true">
+                    <span class="halo"></span><span class="fill stencil-4"></span><span class="speck stencil-4"></span>
+                    <svg class="drip" viewBox="0 0 220 60"><use href="#dripSet"/></svg>
+                </div>
+                <span class="tape f-marker">Speed</span>
+                <span class="sticker" style="--sticker-color:var(--gold)">04</span>
+                <div class="card-chip" style="--accent:var(--gold); --chiptext:var(--lime)">
+                    <svg class="icon-stencil" viewBox="0 0 64 64" aria-hidden="true"><use href="#iconBolt"/></svg>
+                    <h3>4.2x Speed</h3>
+                    <p>50 applications while you sleep.</p>
+                </div>
+            </div>
+
+            <div class="feature-card">
+                <div class="paint-blob" style="--hue:var(--gold)" aria-hidden="true">
+                    <span class="halo"></span><span class="fill stencil-1"></span><span class="speck stencil-1"></span>
+                    <svg class="drip" viewBox="0 0 220 60"><use href="#dripSet"/></svg>
+                </div>
+                <span class="tape f-marker">Track</span>
+                <span class="sticker" style="--sticker-color:var(--purple)">05</span>
+                <div class="card-chip" style="--accent:var(--purple); --chiptext:var(--pink)">
+                    <svg class="icon-stencil" viewBox="0 0 64 64" aria-hidden="true"><use href="#iconChart"/></svg>
+                    <h3>Pipeline</h3>
+                    <p>Track every app. See interviews. Know odds.</p>
+                </div>
+            </div>
+
+            <div class="feature-card">
+                <div class="paint-blob edge-b" style="--hue:var(--orange)" aria-hidden="true">
+                    <span class="halo"></span><span class="fill stencil-2"></span><span class="speck stencil-2"></span>
+                    <svg class="drip" viewBox="0 0 220 60"><use href="#dripSet"/></svg>
+                </div>
+                <span class="tape f-marker">Paid</span>
+                <span class="sticker" style="--sticker-color:var(--cyan)">06</span>
+                <div class="card-chip" style="--accent:var(--lime); --chiptext:var(--cyan)">
+                    <svg class="icon-stencil" viewBox="0 0 64 64" aria-hidden="true"><use href="#iconDollar"/></svg>
+                    <h3>$340K Avg</h3>
+                    <p>Typical first-year gain from better roles.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- STATS SECTION -->
+    <section class="stats-section">
+        <div class="paint-blob bleed bleed-top parallax" data-speed="0.1" style="--hue:var(--pink); width:150px; height:150px; right:10%;" aria-hidden="true">
+            <span class="halo"></span><span class="fill stencil-2"></span>
+        </div>
+
+        <div class="section-clip" aria-hidden="true">
+            <div class="paint-blob" style="--hue:var(--purple); width:480px; height:380px; top:-60px; left:-120px;">
+                <span class="halo"></span><span class="fill stencil-3"></span><span class="speck stencil-3"></span>
+            </div>
+            <div class="paint-blob edge-b" style="--hue:var(--lime); width:460px; height:360px; bottom:-60px; right:-110px;">
+                <span class="halo"></span><span class="fill stencil-4"></span><span class="speck stencil-4"></span>
+            </div>
+            <div class="paint-blob" style="--hue:var(--orange); width:340px; height:320px; top:20%; left:36%;">
+                <span class="halo"></span><span class="fill stencil-2"></span>
+            </div>
+        </div>
+
+        <div class="stat-box">
+            <div class="paint-blob" style="--hue:var(--pink)" aria-hidden="true"><span class="fill stencil-1"></span></div>
+            <span class="sticker" style="--sticker-color:var(--pink)"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13 2c.5 4-2 5-3.5 7.2C8 11.5 8 13 8 13S6 12 5.6 9.6C4 11.4 3.5 13.4 3.5 15a8.5 8.5 0 0017 0c0-5-3.5-7.5-4.8-9.2C14.3 4 13.6 3 13 2z"/></svg></span>
+            <div class="stat-inner">
+                <div class="stat-number">47K+</div>
+                <div class="stat-label">Apps Submitted</div>
+            </div>
+        </div>
+        <div class="stat-box">
+            <div class="paint-blob edge-b" style="--hue:var(--gold)" aria-hidden="true"><span class="fill stencil-3"></span></div>
+            <span class="sticker" style="--sticker-color:var(--gold)"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 20h18v2H3zM5 12h3v7H5zm5.5-5h3v12h-3zM16 9h3v10h-3z"/></svg></span>
+            <div class="stat-inner">
+                <div class="stat-number">34%</div>
+                <div class="stat-label">Interview Lift</div>
+            </div>
+        </div>
+        <div class="stat-box">
+            <div class="paint-blob" style="--hue:var(--cyan)" aria-hidden="true"><span class="fill stencil-4"></span></div>
+            <span class="sticker" style="--sticker-color:var(--cyan)"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 5h20v14H2zm10 3a4 4 0 100 8 4 4 0 000-8zM5 8a2 2 0 01-2 2V8zm14 0h2v2a2 2 0 01-2-2zM3 14a2 2 0 012 2H3zm16 2a2 2 0 012-2v2z"/></svg></span>
+            <div class="stat-inner">
+                <div class="stat-number">$340K</div>
+                <div class="stat-label">Avg First Year</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TICKER -->
+    <div class="ticker">
+        <div class="ticker-track">
+            <span>★ NO RESUME BUILDER NEEDED</span>
+            <span>★ REVIEW BEFORE EVERY SUBMIT</span>
+            <span>★ BUILT FOR JOB SEEKERS</span>
+            <span>★ HUMAN IN THE LOOP</span>
+            <span>★ NO RESUME BUILDER NEEDED</span>
+            <span>★ REVIEW BEFORE EVERY SUBMIT</span>
+            <span>★ BUILT FOR JOB SEEKERS</span>
+            <span>★ HUMAN IN THE LOOP</span>
+        </div>
+    </div>
+
+    <!-- HOW IT WORKS -->
+    <section class="steps-section">
+        <div class="paint-blob bleed bleed-top parallax" data-speed="0.1" style="--hue:var(--lime); width:56px; height:56px; left:8%;" aria-hidden="true">
+            <span class="halo"></span><span class="fill stencil-1"></span><span class="speck stencil-1"></span>
+        </div>
+
+        <div class="paint-blob" style="--hue:var(--blue); width:520px; height:420px; top:-50px; right:-110px; z-index:1;" aria-hidden="true">
+            <span class="halo"></span><span class="fill stencil-2"></span><span class="speck stencil-2"></span>
+        </div>
+        <div class="paint-blob edge-b" style="--hue:var(--pink); width:460px; height:380px; top:20px; left:-90px; z-index:1;" aria-hidden="true">
+            <span class="halo"></span><span class="fill stencil-4"></span><span class="speck stencil-4"></span>
+        </div>
+
+        <div class="section-title-wrap">
+            <h2 class="section-title">HOW IT WORKS</h2>
+            <svg class="scribble" viewBox="0 0 300 40" aria-hidden="true"><path d="M5 25 Q40 5 80 22 T160 18 T240 26 T295 15"/></svg>
+        </div>
+
+        <div class="steps-grid">
+            <div class="step">
+                <div class="paint-blob" style="--hue:var(--pink)" aria-hidden="true"><span class="fill stencil-3"></span><span class="speck stencil-3"></span></div>
+                <div class="step-inner" style="--accent:var(--cyan); --chiptext:var(--gold)">
+                    <div class="step-number">1</div>
+                    <h4>Intake</h4>
+                    <p>Tell us your goals. We learn what matters.</p>
+                </div>
+                <span class="tape f-marker">Step 1</span>
+            </div>
+            <div class="step">
+                <div class="paint-blob edge-b" style="--hue:var(--cyan)" aria-hidden="true"><span class="fill stencil-4"></span><span class="speck stencil-4"></span></div>
+                <div class="step-inner" style="--accent:var(--pink); --chiptext:var(--lime)">
+                    <div class="step-number">2</div>
+                    <h4>Discover</h4>
+                    <p>Scan jobs. Filter by preferences. Rank by match.</p>
+                </div>
+                <span class="tape f-marker">Step 2</span>
+            </div>
+            <div class="step">
+                <div class="paint-blob" style="--hue:var(--orange)" aria-hidden="true"><span class="fill stencil-1"></span><span class="speck stencil-1"></span></div>
+                <div class="step-inner" style="--accent:var(--lime); --chiptext:var(--cyan)">
+                    <div class="step-number">3</div>
+                    <h4>Auto-Apply</h4>
+                    <p>Custom resume + answers. You review. We submit.</p>
+                </div>
+                <span class="tape f-marker">Step 3</span>
+            </div>
+            <div class="step">
+                <div class="paint-blob edge-b" style="--hue:var(--blue)" aria-hidden="true"><span class="fill stencil-2"></span><span class="speck stencil-2"></span></div>
+                <div class="step-inner" style="--accent:var(--gold); --chiptext:var(--pink)">
+                    <div class="step-number">4</div>
+                    <h4>Win</h4>
+                    <p>Dashboard tracks leads. Learn. Double down.</p>
+                </div>
+                <span class="tape f-marker">Step 4</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA SECTION -->
+    <section class="cta-section">
+        <div class="paint-blob bleed bleed-top parallax" data-speed="0.12" style="--hue:var(--purple); width:150px; height:150px; right:12%;" aria-hidden="true">
+            <span class="halo"></span><span class="fill stencil-3"></span>
+        </div>
+        <div class="cta-clip" aria-hidden="true">
+            <div class="paint-blob cta-blob edge-b" style="--hue:var(--pink)">
+                <span class="halo"></span><span class="fill stencil-4"></span><span class="speck stencil-4"></span>
+            </div>
+            <div class="paint-blob" style="--hue:var(--cyan); width:480px; height:420px; top:-100px; left:-120px;">
+                <span class="halo"></span><span class="fill stencil-1"></span><span class="speck stencil-1"></span>
+            </div>
+            <div class="paint-blob edge-b" style="--hue:var(--gold); width:460px; height:400px; bottom:-100px; right:-110px;">
+                <span class="halo"></span><span class="fill stencil-2"></span><span class="speck stencil-2"></span>
+            </div>
+        </div>
+        <div class="cta-inner">
+            <span class="tape f-marker">Limited Spots</span>
+            <span class="sticker" style="--sticker-color:var(--lime)">★</span>
+            <h2>Get Hired Today</h2>
+            <svg class="scribble" viewBox="0 0 300 40" aria-hidden="true"><path d="M5 25 Q40 5 80 22 T160 18 T240 26 T295 15"/></svg>
+            <button class="btn primary cta-button">Start Now → Free</button>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer>
+        <div class="footer-backdrop" aria-hidden="true">
+            <div class="paint-blob" style="--hue:var(--pink); width:480px; height:420px; top:-80px; left:-100px;">
+                <span class="fill stencil-1"></span>
+            </div>
+            <div class="paint-blob edge-b" style="--hue:var(--purple); width:440px; height:400px; top:-40px; left:32%;">
+                <span class="fill stencil-3"></span>
+            </div>
+            <div class="paint-blob" style="--hue:var(--blue); width:460px; height:420px; top:-60px; right:-110px;">
+                <span class="fill stencil-2"></span>
+            </div>
+        </div>
+        <div>
+            <h5>Product</h5>
+            <a href="#">Features</a>
+            <a href="#">Pricing</a>
+            <a href="#">Roadmap</a>
+        </div>
+        <div>
+            <h5>Company</h5>
+            <a href="#">About</a>
+            <a href="#">Blog</a>
+            <a href="#">Careers</a>
+        </div>
+        <div>
+            <h5>Connect</h5>
+            <a href="#">GitHub</a>
+            <a href="#">Twitter</a>
+            <a href="#">Discord</a>
+        </div>
+        <div class="footer-bottom">
+            © 2026 jobbot. <span class="f-marker">spray-painted with love</span>
+        </div>
+    </footer>
+
+    <script>
+        (function () {
+            var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            if (reduceMotion) return;
+            var layers = document.querySelectorAll('.parallax');
+            if (!layers.length) return;
+            var ticking = false;
+            function update() {
+                var y = window.scrollY;
+                layers.forEach(function (el) {
+                    var speed = parseFloat(el.dataset.speed) || 0.12;
+                    el.style.transform = 'translateY(' + (y * speed * -1) + 'px)';
+                });
+                ticking = false;
+            }
+            window.addEventListener('scroll', function () {
+                if (!ticking) { window.requestAnimationFrame(update); ticking = true; }
+            }, { passive: true });
+        })();
+    </script>
+</body>
+</html>

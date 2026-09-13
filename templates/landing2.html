@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>jobbot — stop applying by hand</title>
+<meta name="description" content="jobbot filters postings, tailors resumes, answers screening questions once, and auto-submits 50+ tailored applications a week with human review.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=National+Park:wght@400;500;700;800&family=Lato:ital,wght@0,400;0,700;1,400;1,700&family=Monofett&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&family=Nanum+Pen+Script&family=BIZ+UDMincho:ital,wght@0,400;0,700&family=Zilla+Slab+Highlight&family=VT323&family=Open+Sans:ital,wght@0,400;0,700;1,400;1,700&family=Roboto+Mono:ital,wght@0,400;0,700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html {
+    --rpx: min(calc(100vw / 600), 1px);
+    -webkit-text-size-adjust: none;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: rgb(224,224,255);
+    overflow-x: hidden;
+    font-family: 'National Park', 'Inter', Arial, sans-serif;
+    color: #000;
+  }
+  a { color: inherit; }
+  h1.visually-hidden {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .stage {
+    position: relative;
+    width: 100%;
+    height: calc(6228 * var(--rpx));
+  }
+  .block {
+    position: absolute;
+    left: calc(50% + (var(--x) - 300) * var(--rpx));
+    top: calc(var(--y) * var(--rpx));
+    width: calc(var(--w) * var(--rpx));
+    height: calc(var(--h) * var(--rpx));
+    z-index: var(--z);
+    transform: translate(-50%, -50%) rotate(calc(var(--rot) * 1deg));
+  }
+  .block img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    pointer-events: none;
+  }
+  .text-block { overflow: visible; }
+  .text-inner p {
+    margin: 0;
+    padding: 0;
+    color: #000;
+  }
+  .text-inner strong { font-weight: 700; }
+  @media (prefers-reduced-motion: reduce) {
+    .block img[src$=".gif"] { animation: none; }
+  }
+</style>
+</head>
+<body>
+<h1 class="visually-hidden">jobbot: stop applying by hand — automated job search for job seekers</h1>
+<div class="stage" id="stage">
+</content>
+
+<div class="block" style="--x:322;--y:374;--w:1317;--h:883;--z:49650;--rot:0;"><img src="/static/landing2/img/asset-8bd696a182.jpg" alt="" style="object-fit:cover"></div>
+<div class="block" style="--x:223;--y:8;--w:82;--h:80;--z:49730;--rot:0;"><img src="/static/landing2/img/asset-36cc96ea5e.gif" alt="Source: Jason Clarke" style="object-fit:contain"></div>
+<div class="block" style="--x:-176;--y:66;--w:180;--h:180;--z:49735;--rot:0;"><a href="/intake" title="Start onboarding — upload your resume" style="display:block;width:100%;height:100%;border-radius:50%;background:#5b4cdb;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:inset 0 -6px 0 rgba(0,0,0,0.15)"><span style="font-family:'Nanum Pen Script',cursive;color:#fff;font-size:calc(34 * var(--rpx));transform:rotate(-6deg)">jobbot</span></a></div>
+<div class="block text-block" style="--x:488;--y:70;--w:247;--h:47;--z:50345;--rot:0;"><div class="text-inner" style="background:rgba(255,255,255,0.92);border-radius:calc(10*var(--rpx));padding:calc(4*var(--rpx)) calc(10*var(--rpx));box-shadow:0 0 0 calc(1px) rgba(0,0,0,0.05)"><p style="font-family:Monofett;font-size:calc(16 * var(--rpx));line-height:1.4">Your job hunt needs an operator</p></div></div>
+<div class="block heading" style="--x:304;--y:192;--w:600;--h:288;--z:50235;--rot:0;"><div style="font-family:'National Park',sans-serif;font-weight:700;font-size:calc(26 * var(--rpx));line-height:1.25;text-align:center;color:#000;width:100%;height:100%;display:flex;align-items:center;justify-content:center">A job search without jobbot is like Chuck Norris without a beard. Technically capable, but strategically blind.</div></div>
+<div class="block" style="--x:321;--y:86;--w:70;--h:46;--z:50350;--rot:0;"><img src="/static/landing2/img/asset-ae687c70ea.gif" alt="Source: Sesame Street" style="object-fit:contain"></div>
+<div class="block" style="--x:570;--y:268;--w:80;--h:90;--z:49715;--rot:0;"><div style="width:100%;height:100%;border-radius:50%;background:#000"></div></div>
+<div class="block" style="--x:-340;--y:281;--w:82;--h:80;--z:49720;--rot:0;"><img src="/static/landing2/img/asset-36cc96ea5e.gif" alt="Source: Jason Clarke" style="object-fit:contain"></div>
+<div class="block" style="--x:288;--y:364;--w:180;--h:173;--z:49695;--rot:0;"><img src="/static/landing2/img/asset-59b3820b15.gif" alt="Source: QuikTrip" style="object-fit:contain"></div>
+<div class="block" style="--x:288;--y:427;--w:308;--h:227;--z:49700;--rot:0;"><img src="/static/landing2/img/asset-2409278a72.gif" alt="Source: Wunostacy" style="object-fit:contain"></div>
+<div class="block" style="--x:194;--y:396;--w:81;--h:83;--z:49740;--rot:0;"><img src="/static/landing2/img/asset-fb77b792a0.gif" alt="Source: Silvie Bomhard" style="object-fit:contain"></div>
+<div class="block" style="--x:923;--y:395;--w:82;--h:80;--z:49710;--rot:0;"><img src="/static/landing2/img/asset-36cc96ea5e.gif" alt="Source: Jason Clarke" style="object-fit:contain"></div>
+<div class="block" style="--x:0;--y:452;--w:80;--h:90;--z:49725;--rot:0;"><div style="width:100%;height:100%;border-radius:50%;background:#000"></div></div>
+<div class="block" style="--x:334;--y:607;--w:514;--h:307;--z:49745;--rot:19.27;"><img src="/static/landing2/img/asset-a6df01bc62.gif" alt="Source: msgigiyu" style="object-fit:contain"></div>
+<div class="block" style="--x:271;--y:525;--w:50;--h:120;--z:49750;--rot:0;"><img src="/static/landing2/img/asset-191a616ef1.gif" alt="Source: africapitarch" style="object-fit:contain"></div>
+<div class="block" style="--x:337;--y:715;--w:573;--h:383;--z:49755;--rot:15.7;"><img src="/static/landing2/img/asset-a6df01bc62.gif" alt="Source: msgigiyu" style="object-fit:contain"></div>
+<div class="block text-block" style="--x:314;--y:676;--w:432;--h:220;--z:50220;--rot:0;"><div class="text-inner"><p style="font-family:'Space Mono';font-size:calc(17.6 * var(--rpx));line-height:1.25;text-align:center">Most job seekers treat applications like confetti. They fling resumes everywhere, leave a mess, and pray for a callback. jobbot steps in as your Fractional Application Chief. It brings order, targeting and the kind of relentless persistence that gets your profile in front of every recruiter—job boards, referrals, cold outreach, and even the unconventional channels no one else bothers with.</p></div></div>
+<div class="block" style="--x:256;--y:875;--w:433;--h:282;--z:50110;--rot:0;"><img src="/static/landing2/img/asset-2409278a72.gif" alt="Source: Wunostacy" style="object-fit:contain"></div>
+<div class="block" style="--x:276;--y:807;--w:48;--h:122;--z:49705;--rot:0;"><img src="/static/landing2/img/asset-191a616ef1.gif" alt="Source: africapitarch" style="object-fit:contain"></div>
+<div class="block" style="--x:95;--y:843;--w:107;--h:115;--z:50200;--rot:-58.95;"><img src="/static/landing2/img/asset-5060552dc3.gif" alt="Source: Meroware" style="object-fit:contain"></div>
+<div class="block" style="--x:470;--y:854;--w:107;--h:115;--z:50205;--rot:57.31;"><img src="/static/landing2/img/asset-5060552dc3.gif" alt="Source: Meroware" style="object-fit:contain"></div>
+<div class="block heading" style="--x:271;--y:904;--w:375;--h:174;--z:50115;--rot:0;"><div style="font-family:'National Park',sans-serif;font-weight:700;font-size:calc(15 * var(--rpx));line-height:1.25;text-align:center;color:#000;width:100%;height:100%;display:flex;align-items:center;justify-content:center">Why let jobbot apply for you?</div></div>
+<div class="block" style="--x:358;--y:1522;--w:1566;--h:1409;--z:50095;--rot:0;"><img src="/static/landing2/img/asset-3c461998a9.jpg" alt="" style="object-fit:cover"></div>
+<div class="block" style="--x:504;--y:1406;--w:1857;--h:1034;--z:49690;--rot:0;"><img src="/static/landing2/img/asset-f4e9f6c6ec.jpg" alt="" style="object-fit:cover"></div>
+<div class="block" style="--x:308;--y:2080;--w:1258;--h:1699;--z:49760;--rot:0;"><img src="/static/landing2/img/asset-3544e4a2b0.jpg" alt="" style="object-fit:cover"></div>
+<div class="block" style="--x:180;--y:1061;--w:245;--h:218;--z:50100;--rot:0;"><img src="/static/landing2/img/asset-513fbcc041.gif" alt="Source: zandraart" style="object-fit:contain"></div>
+<div class="block" style="--x:342;--y:1109;--w:169;--h:169;--z:50240;--rot:0;"><img src="/static/landing2/img/asset-7f672c99e7.gif" alt="Source: HBO" style="object-fit:contain"></div>
+<div class="block text-block" style="--x:180;--y:1055;--w:144;--h:48;--z:50105;--rot:0;"><div class="text-inner"><p style="font-family:'Space Mono';font-size:calc(12.799999999999999 * var(--rpx));line-height:1.25;color:rgb(0, 0, 0)">First, let me tell you a story about a stubborn lighthouse keeper</p></div></div>
+<div class="block" style="--x:292;--y:2031;--w:524;--h:1707;--z:50130;--rot:0;"><div style="width:100%;height:100%;background:#fffcfc"></div></div>
+<div class="block" style="--x:62;--y:1209;--w:36;--h:45;--z:50140;--rot:0;"><img src="/static/landing2/img/asset-730d4bf698.gif" alt="Source: Arthur Coppens" style="object-fit:contain"></div>
+<div class="block text-block" style="--x:441;--y:1797;--w:233;--h:1180;--z:50135;--rot:0;"><div class="text-inner"><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">The apprentice, moved, replies, "I could listen for hours. This story tells us something important."</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">The captain asks, "What?"</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">The keeper replies, "That persistence, unless paired with precision, runs the risk of being mere noise."</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">You see, a good job search blooms from real qualifications. But applications sent without any precision are mere noise.</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">And noise won't land you an interview. And that's where jobbot comes in.</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">Everyone else is burning hours chasing the same tired tactics—mass-applying, keyword-stuffing, generic cover letters, the latest resume hack.</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">With jobbot as your Application Chief, you don't out-hustle the market. You out-target it. With precise, tailored applications.</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">Everywhere the right roles show up. Because a precise application is the smartest unfair advantage</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">Invisible on your calendar, glaringly obvious in your inbox.</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p></div></div>
+<div class="block text-block" style="--x:197;--y:2063;--w:233;--h:1705;--z:50245;--rot:0;"><div class="text-inner"><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">f your application doesn't answer the recruiter's real question, it isn't communicating. It's just a bad, boring, ignorable form submission.</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">This applies to every channel — job boards, referrals, cold emails, LinkedIn messages, recruiter calls, yada yada yada.</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">And speaking of answering the real question...</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">At a small coastal harbor, there's this old story that stuck with me.</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">For months, the harbor master had been trying to convince the town council to keep the old lighthouse funded.</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">The lighthouse was a battered structure built in 1980. Sailors up and down the coast loved it and swore it had saved their lives.</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">Because the keeper used to personally track every ship passing in the fog.</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">So the harbor master tells the council another story about the keeper.</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">He says, "When she was 15, she started logging every boat by hand, in a notebook, every single night."</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">Then the harbor master adds, "But she wanted them to arrive safely, not just be logged."</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">The harbor master also adds, "Then she told the council: a light that only sometimes turns on is worse than no light at all."</p><p style="font-family:Lato;line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(16 * var(--rpx));line-height:1.25">&nbsp;</p></div></div>
+<div class="block" style="--x:307;--y:2063;--w:526;--h:1675;--z:50125;--rot:0;"><div style="width:100%;height:100%;background:#ff5dfc"></div></div>
+<div class="block" style="--x:334;--y:2428;--w:1470;--h:976;--z:50120;--rot:-180;"><img src="/static/landing2/img/asset-16db47fb62.jpg" alt="" style="object-fit:cover"></div>
+<div class="block" style="--x:408;--y:2477;--w:169;--h:211;--z:50145;--rot:0;"><img src="/static/landing2/img/asset-543ca04b46.png" alt="" style="object-fit:contain"></div>
+<div class="block text-block" style="--x:433;--y:2620;--w:226;--h:45;--z:50150;--rot:0;"><div class="text-inner"><p style="font-family:'Nanum Pen Script';font-size:calc(16 * var(--rpx));line-height:1.25;color:rgb(255, 93, 252)">jobbot, your Application Chief</p><p style="font-family:Lato;font-size:calc(20 * var(--rpx));line-height:1.25">&nbsp;</p></div></div>
+<div class="block heading" style="--x:275;--y:2956;--w:532;--h:212;--z:50330;--rot:0;"><div style="font-family:'National Park',sans-serif;font-weight:700;font-size:calc(17 * var(--rpx));line-height:1.25;text-align:center;color:#000;width:100%;height:100%;display:flex;align-items:center;justify-content:center">Boards jobbot has beaten</div></div>
+<div class="block" style="--x:300;--y:3664;--w:1606;--h:763;--z:49765;--rot:0;"><img src="/static/landing2/img/asset-7d08b9b774.jpg" alt="" style="object-fit:cover"></div>
+<div class="block" style="--x:329;--y:3102;--w:139;--h:38;--z:50265;--rot:0;"><div style="font-family:'Zilla Slab Highlight',serif;font-weight:700;font-size:calc(20.900000000000002 * var(--rpx));line-height:1;color:#5b4cdb;width:100%;height:100%;display:flex;align-items:center;justify-content:center;white-space:nowrap">Ashby</div></div>
+<div class="block" style="--x:457;--y:3096;--w:80;--h:26;--z:50250;--rot:0;"><div style="font-family:'Zilla Slab Highlight',serif;font-weight:700;font-size:calc(14.3 * var(--rpx));line-height:1;color:#e6533c;width:100%;height:100%;display:flex;align-items:center;justify-content:center;white-space:nowrap">Workday</div></div>
+<div class="block heading" style="--x:234;--y:3237;--w:600;--h:288;--z:50290;--rot:0;"><div style="font-family:'National Park',sans-serif;font-weight:700;font-size:calc(26 * var(--rpx));line-height:1.25;text-align:center;color:#000;width:100%;height:100%;display:flex;align-items:center;justify-content:center">The strategy, the targeting, the relentless persistence of an Application Chief—without the full-time salary</div></div>
+<div class="block" style="--x:79;--y:3108;--w:99;--h:31;--z:50255;--rot:0;"><div style="font-family:'Zilla Slab Highlight',serif;font-weight:700;font-size:calc(17.05 * var(--rpx));line-height:1;color:#31a05f;width:100%;height:100%;display:flex;align-items:center;justify-content:center;white-space:nowrap">Greenhouse</div></div>
+<div class="block" style="--x:197;--y:3108;--w:101;--h:25;--z:50260;--rot:0;"><div style="font-family:'Zilla Slab Highlight',serif;font-weight:700;font-size:calc(13.750000000000002 * var(--rpx));line-height:1;color:#4a4a4a;width:100%;height:100%;display:flex;align-items:center;justify-content:center;white-space:nowrap">Lever</div></div>
+<div class="block text-block" style="--x:172;--y:3372;--w:230;--h:60;--z:50285;--rot:0;"><div class="text-inner"><p style="font-family:Lato;font-size:calc(22 * var(--rpx));line-height:1.4;color:rgb(0, 0, 0)">Work with jobbot</p></div></div>
+<div class="block" style="--x:69;--y:3530;--w:50;--h:207;--z:49805;--rot:0;"><img src="/static/landing2/img/asset-191a616ef1.gif" alt="Source: africapitarch" style="object-fit:contain"></div>
+<div class="block text-block" style="--x:262;--y:3509;--w:362;--h:132;--z:50275;--rot:0;"><div class="text-inner"><p style="font-family:'Space Mono';font-size:calc(17.6 * var(--rpx));line-height:1.25;color:rgb(0, 0, 0)">A full-time in-house recruiter typically costs $120k/year and sits in meetings. A staffing agency fills roles but skips strategy. Me? Think of me as the tireless junior hire</p></div></div>
+<div class="block" style="--x:80;--y:3691;--w:91;--h:88;--z:50085;--rot:-3.1;"><img src="/static/landing2/img/asset-16017452ac.gif" alt="Source: undefined" style="object-fit:contain"></div>
+<div class="block" style="--x:343;--y:4427;--w:1555;--h:895;--z:49645;--rot:0;"><img src="/static/landing2/img/asset-7356a2b7f2.jpg" alt="" style="object-fit:cover"></div>
+<div class="block heading" style="--x:312;--y:3892;--w:600;--h:288;--z:50315;--rot:0;"><div style="font-family:'National Park',sans-serif;font-weight:700;font-size:calc(26 * var(--rpx));line-height:1.25;text-align:center;color:#000;width:100%;height:100%;display:flex;align-items:center;justify-content:center">Recruiter, ATS parser, resume coach, indie job seeker—jobbot's been trained on all four. Parsing postings from Workday, Greenhouse, Lever, Ashby and more taught it nuance. It's seen it all—so it knows how to turn your applications into interviews landing. Cha-ching.</div></div>
+<div class="block" style="--x:286;--y:4090;--w:50;--h:176;--z:49860;--rot:0;"><img src="/static/landing2/img/asset-191a616ef1.gif" alt="Source: africapitarch" style="object-fit:contain"></div>
+<div class="block" style="--x:562;--y:4618;--w:874;--h:626;--z:49680;--rot:0;"><img src="/static/landing2/img/asset-7828a9144c.gif" alt="Source: Josh Rigling" style="object-fit:contain"></div>
+<div class="block" style="--x:-125;--y:4629;--w:537;--h:621;--z:49675;--rot:0;"><img src="/static/landing2/img/asset-1d50fb43a7.jpg" alt="" style="object-fit:contain"></div>
+<div class="block" style="--x:316;--y:4465;--w:383;--h:275;--z:49965;--rot:0;"><img src="/static/landing2/img/asset-2409278a72.gif" alt="Source: Wunostacy" style="object-fit:contain"></div>
+<div class="block heading" style="--x:329;--y:4471;--w:375;--h:180;--z:49970;--rot:0;"><div style="font-family:'National Park',sans-serif;font-weight:700;font-size:calc(15 * var(--rpx));line-height:1.25;text-align:center;color:#000;width:100%;height:100%;display:flex;align-items:center;justify-content:center">What is jobbot anyway?</div></div>
+<div class="block" style="--x:165;--y:4725;--w:356;--h:362;--z:49980;--rot:0;"><img src="/static/landing2/img/asset-1958d81101.png" alt="" style="object-fit:contain"></div>
+<div class="block" style="--x:165;--y:4717;--w:213;--h:276;--z:49975;--rot:0;"><svg viewBox="0 0 100 130" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;background:#cfd8ff"><rect width="100" height="130" fill="#cfd8ff"/><circle cx="50" cy="46" r="26" fill="#2b2f77"/><path d="M14 130 C14 92 30 74 50 74 C70 74 86 92 86 130 Z" fill="#2b2f77"/><circle cx="40" cy="44" r="4" fill="#fffb00"/><circle cx="60" cy="44" r="4" fill="#fffb00"/><rect x="34" y="60" width="32" height="5" rx="2.5" fill="#fffb00"/></svg></div>
+<div class="block" style="--x:369;--y:4680;--w:348;--h:151;--z:49985;--rot:0;"><img src="/static/landing2/img/asset-8a674a5af5.gif" alt="Source: VTech Toys" style="object-fit:contain"></div>
+<div class="block text-block" style="--x:388;--y:4674;--w:235;--h:84;--z:49990;--rot:0;"><div class="text-inner"><p style="font-family:'Space Mono';font-size:calc(12.799999999999999 * var(--rpx));line-height:1.25;color:#000000">Hey hey there. jobbot here, the engine behind your job search. When you run me, this is what you're truly hiring.</p><p style="font-family:Lato;font-size:calc(20 * var(--rpx));line-height:1.25">&nbsp;</p></div></div>
+<div class="block" style="--x:492;--y:4957;--w:162;--h:180;--z:50175;--rot:0;"><img src="/static/landing2/img/asset-e4847a8b4f.gif" alt="Source: KETNIPZ" style="object-fit:contain"></div>
+<div class="block" style="--x:35;--y:4957;--w:104;--h:89;--z:50020;--rot:-7.24;"><img src="/static/landing2/img/asset-39191315a1.gif" alt="Source: J O T A" style="object-fit:contain"></div>
+<div class="block" style="--x:381;--y:5088;--w:341;--h:257;--z:50005;--rot:-4.77;"><div style="width:100%;height:100%;background:#1c1c1f"></div></div>
+<div class="block" style="--x:396;--y:5103;--w:339;--h:247;--z:50000;--rot:-4.77;"><div style="width:100%;height:100%;background:#ffffff"></div></div>
+<div class="block" style="--x:113;--y:5075;--w:180;--h:180;--z:49995;--rot:-4.44;"><div style="width:100%;height:100%;background:#1c1c1f;display:flex;align-items:center;justify-content:center;padding:calc(10*var(--rpx));box-sizing:border-box;overflow:hidden"><span style="font-family:'VT323',monospace;color:#fff;text-align:center;font-size:calc(15.84 * var(--rpx));line-height:1.2;text-shadow:1px 0 #3cffc5,-1px 0 #ff5dfc">You're not mass-applying. You've got an operator working the pipeline, just like you'd want.</span></div></div>
+<div class="block text-block" style="--x:384;--y:5072;--w:309;--h:153;--z:50010;--rot:-6.5;"><div class="text-inner"><p style="font-family:'Space Mono';font-size:calc(12.799999999999999 * var(--rpx));line-height:1.25;color:rgb(255, 255, 255)">I run on your machine locally, so I understand your challenges (job hunting alone is hard!). </p><p style="font-family:Lato;font-size:calc(20 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(12.799999999999999 * var(--rpx));line-height:1.25;color:rgb(255, 255, 255)">jobbot is here to help job seekers like you find the right role. And use automation as your unfair advantage to COMPETE with candidates who apply by hand.</p></div></div>
+<div class="block" style="--x:-117;--y:5203;--w:162;--h:226;--z:50180;--rot:0;"><img src="/static/landing2/img/asset-afb2640284.gif" alt="Source: KETNIPZ" style="object-fit:contain"></div>
+<div class="block" style="--x:-44;--y:5282;--w:525;--h:310;--z:49670;--rot:-7.2;"><img src="/static/landing2/img/asset-b08f74c793.gif" alt="Source: undefined" style="object-fit:contain"></div>
+<div class="block" style="--x:377;--y:5391;--w:337;--h:309;--z:50030;--rot:-4.8;"><div style="width:100%;height:100%;background:#1c1c1f"></div></div>
+<div class="block" style="--x:44;--y:5282;--w:104;--h:85;--z:50015;--rot:-7.38;"><img src="/static/landing2/img/asset-bf8b115381.gif" alt="Source: J O T A" style="object-fit:contain"></div>
+<div class="block" style="--x:393;--y:5387;--w:330;--h:267;--z:50025;--rot:-4.77;"><div style="width:100%;height:100%;background:#ffffff"></div></div>
+<div class="block text-block" style="--x:384;--y:5348;--w:292;--h:185;--z:50035;--rot:-4.71;"><div class="text-inner"><p style="font-family:'Space Mono';font-size:calc(12.8 * var(--rpx));line-height:1.25;color:rgb(255, 255, 255)">I'm built on real hiring-pipeline data and have parsed thousands of postings across every major ATS. </p><p style="font-family:Lato;font-size:calc(20 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(12.8 * var(--rpx));line-height:1.25;color:rgb(255, 255, 255)">I also have a proven track record filing applications at 50+/week without burning out the humans behind them. I was trained on postings from Workday, Greenhouse, Lever and Ashby.</p></div></div>
+<div class="block" style="--x:88;--y:5400;--w:170;--h:170;--z:50225;--rot:-5.9;"><div style="width:100%;height:100%;background:#000000"></div></div>
+<div class="block" style="--x:716;--y:5566;--w:410;--h:469;--z:49665;--rot:18.46;"><img src="/static/landing2/img/asset-1467389b25.jpg" alt="" style="object-fit:contain"></div>
+<div class="block text-block" style="--x:96;--y:5379;--w:161;--h:84;--z:50230;--rot:-6.5;"><div class="text-inner"><p style="font-family:'Roboto Mono';font-size:calc(20 * var(--rpx));line-height:1;color:rgb(255, 255, 255)"><strong>Not your typical job bot.</strong></p></div></div>
+<div class="block" style="--x:-204;--y:5715;--w:737;--h:629;--z:49660;--rot:-33.7;"><img src="/static/landing2/img/asset-88b827114e.jpg" alt="" style="object-fit:contain"></div>
+<div class="block" style="--x:536;--y:5518;--w:122;--h:94;--z:50055;--rot:-13.5;"><img src="/static/landing2/img/asset-d15a74f3b8.gif" alt="Source: Heymandini" style="object-fit:contain"></div>
+<div class="block" style="--x:63;--y:5564;--w:71;--h:74;--z:50060;--rot:-4.04;"><img src="/static/landing2/img/asset-a7b47e9ec5.gif" alt="Source: J O T A" style="object-fit:contain"></div>
+<div class="block" style="--x:240;--y:5572;--w:111;--h:55;--z:50185;--rot:-6.89;"><img src="/static/landing2/img/asset-036816af9f.gif" alt="Source: Michelle Porucznik" style="object-fit:contain"></div>
+<div class="block" style="--x:406;--y:5708;--w:316;--h:284;--z:50075;--rot:-4.77;"><div style="width:100%;height:100%;background:#1c1c1f"></div></div>
+<div class="block text-block" style="--x:401;--y:5709;--w:271;--h:275;--z:50080;--rot:-4.71;"><div class="text-inner"><p style="font-family:'Space Mono';font-size:calc(13.24697276099078 * var(--rpx));line-height:1.25;color:#ffffff">I have learned over thousands and thousands and thousands of parsed postings, screening questions and rejection emails. </p><p style="font-family:Lato;font-size:calc(20 * var(--rpx));line-height:1.25">&nbsp;</p><p style="font-family:'Space Mono';font-size:calc(13.24697276099078 * var(--rpx));line-height:1.25;color:#ffffff">That's why I do things for myself the same way I do them for you. You can't beat this type of experience.</p><p style="font-family:Lato;font-size:calc(20 * var(--rpx));line-height:1.25">&nbsp;</p></div></div>
+<div class="block" style="--x:418;--y:5721;--w:313;--h:275;--z:50065;--rot:-4.77;"><div style="width:100%;height:100%;background:#ffffff"></div></div>
+<div class="block" style="--x:141;--y:5682;--w:180;--h:180;--z:50070;--rot:-5.79;"><img src="/static/landing2/img/asset-079587ca4f.png" alt="" style="object-fit:contain"></div>
+<div class="block" style="--x:275;--y:5879;--w:50;--h:175;--z:50090;--rot:0;"><img src="/static/landing2/img/asset-191a616ef1.gif" alt="Source: africapitarch" style="object-fit:contain"></div>
+<div class="block" style="--x:117;--y:5887;--w:150;--h:180;--z:50155;--rot:0;"><svg viewBox="0 0 100 130" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;background:#ffe3c2"><rect width="100" height="130" fill="#ffe3c2"/><circle cx="50" cy="46" r="26" fill="#a15c2e"/><path d="M14 130 C14 92 30 74 50 74 C70 74 86 92 86 130 Z" fill="#a15c2e"/><circle cx="40" cy="44" r="4" fill="#ffffff"/><circle cx="60" cy="44" r="4" fill="#ffffff"/><rect x="34" y="60" width="32" height="5" rx="2.5" fill="#ffffff"/></svg></div>
+<div class="block" style="--x:400;--y:5931;--w:171;--h:203;--z:50190;--rot:5.77;"><img src="/static/landing2/img/asset-b37971c528.gif" alt="Source: hellojcka" style="object-fit:contain"></div>
+<div class="block" style="--x:248;--y:6004;--w:522;--h:261;--z:50160;--rot:15.03;"><img src="/static/landing2/img/asset-a6df01bc62.gif" alt="Source: msgigiyu" style="object-fit:contain"></div>
+<div class="block heading" style="--x:212;--y:6022;--w:375;--h:180;--z:50165;--rot:0;"><div style="font-family:'National Park',sans-serif;font-weight:700;font-size:calc(15 * var(--rpx));line-height:1.25;text-align:center;color:#000;width:100%;height:100%;display:flex;align-items:center;justify-content:center">Ready to stop applying by hand? Let's see if jobbot's a good fit first</div></div>
+<div class="block" style="--x:407;--y:6019;--w:81;--h:65;--z:50170;--rot:0;"><img src="/static/landing2/img/asset-82e38f6783.gif" alt="Source: Caramell Frap" style="object-fit:contain"></div>
+<div class="block" style="--x:78;--y:6096;--w:89;--h:59;--z:50340;--rot:-7.2;"><img src="/static/landing2/img/asset-1c5039b36d.gif" alt="Source: Sesame Street" style="object-fit:contain"></div>
+<div class="block text-block" style="--x:264;--y:6096;--w:301;--h:47;--z:50335;--rot:0;"><div class="text-inner"><p style="font-family:Lato;font-size:calc(16 * var(--rpx));line-height:1.4;color:rgb(0, 0, 0)">Upgrade your job search's application fuego🔥</p></div></div>
+</div>
+</body>
+</html>
