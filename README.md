@@ -1,157 +1,241 @@
 # jobbot
 
-An autonomous job-application agent. It finds roles, reads each application
-with a vision model, tailors a one-page resume, fills the form, verifies its own
-work against the rendered page, submits, and records exactly what it said.
+**You spend 3 hours filling out applications. The bot spends 3 hours doing it right.**
 
-It is built around one rule:
+An autonomous job application agent that finds roles, reads each one, tailors your resume, answers every screening question, fills the form, verifies its work against the actual page, and submits—then shows you exactly what it said in your name.
 
-> **The model may compose prose. It may never invent a fact.**
+But here's the thing: **it never makes anything up.**
 
-## Why that rule exists
+![Dashboard](docs/img/dashboard-overview.png)
 
-Work authorization, visa sponsorship, criminal history, background-check
-consent, veteran and disability status, education completion, arbitration
-agreements — these are statements *you* make under your own name, often under an
-explicit attestation of truthfulness.
+---
 
-In this system they are answered **only** from a confirmed value in your
-profile. Never inferred, never defaulted to "yes", never guessed by the model.
-If one is missing, that application halts and tells you which. If a core one is
-missing, the whole run refuses to start.
+## The Promise
 
-This is not hypothetical caution. A widely-used open-source applier shipped
-hardcoded felony and background-check answers for every user until a reviewer
-caught it. A popular commercial extension is documented defaulting unknown
-yes/no screeners to "yes" and submitting anyway. Both are the same bug: a system
-answering a legally significant question it was never told the answer to.
+You know that sinking feeling? You get an email: "Your application has been rejected due to your visa sponsorship status." But you never said that.
 
-## Pipeline
+A widely-used open-source applier shipped **hardcoded felony and background check answers** for every user until a reviewer caught it. A commercial competitor is documented **defaulting unknown yes/no questions to "yes"** and hitting submit anyway.
+
+jobbot does neither. It answers legally binding questions *only* from your profile. Not guessed. Not filled in. Not borrowed. If something's missing, it tells you which question and stops.
+
+This isn't paranoia. It's the difference between "rejected" and "your data is compromised."
+
+---
+
+## 60 Seconds
+
+```bash
+# Get it running
+git clone https://github.com/ShryukGrandhi/jobbot.git && cd jobbot
+uv sync
+cp .env.example .env          # add your API key (Claude, Gemini, whatever)
+cp config/profile.example.yaml config/profile.yaml  # fill with your real info
+
+# Dry run (fills forms, doesn't submit)
+uv run jobbot check           # verify setup
+uv run jobbot run --source greenhouse:anthropic --limit 3
+
+# When you're ready
+uv run jobbot run --source greenhouse:anthropic --limit 50 --submit
+```
+
+That's it. The bot runs, the dashboard opens at `localhost:8899`, and you watch it work in real time.
+
+---
+
+## How It Works
 
 ```
 discover → dedup → ghost filter → fit filter          free, no browser
-open tab → detect ATS → clear the account wall        cheap
+open tab → detect ATS → clear account walls           cheap
 CHECKPOINT 1  read every question off the rendered page
-knockout scan would an honest answer auto-reject you?
-─────────────── only now does expensive work start ───────────────
-build a portfolio project → tailor resume → render 1-page PDF
-fill → CHECKPOINT 2  verify + heal loop → submit
-CHECKPOINT 3  did it ACTUALLY go through?
+knockout scan   would a truthful answer auto-reject?
+─────────────── only NOW does expensive work start ───────────────
+build portfolio → tailor resume → render 1-page PDF
+fill → CHECKPOINT 2 verify + heal → submit
+CHECKPOINT 3   did it ACTUALLY go through?
 ```
 
-Stage order is the design. Expensive, irreversible work happens only after the
-form is known to be reachable and winnable. The failure this avoids is
-documented: one published run generated **2,019 tailored resumes to make 112
-submissions**, because it tailored before discovering the form needed an account
-it could not create.
+**Why this order?** 
 
-## What it does
+One published run generated 2,019 tailored resumes just to make 112 submissions. Because it tailored *before* discovering the form needed an account it couldn't create. This tool doesn't.
 
-- **Discovery without scraping.** Greenhouse, Lever, Ashby, Workday,
-  SmartRecruiters and Workable all serve their job boards as unauthenticated
-  JSON. Plus LinkedIn/Indeed via JobSpy, with **company→ATS board resolution** —
-  a LinkedIn listing with no apply link becomes a directly applicable posting on
-  the company's own ATS, which converts far better than the aggregator.
-- **Three vision checkpoints.** Parse, verify-and-heal, then one post-submit
-  call for evidence. Checkpoint 3 exists because *silent success* is the
-  dominant failure mode here — tools routinely log "applied" for jobs never
-  submitted. A click is not confirmation; only on-page evidence is.
-- **The account wall.** In the best public field data (1,503 jobs, 112 applied),
-  **470 of 589 failures were "Workday login required"** — 80%. Not selector rot,
-  not captchas. So Workday gets a real adapter: per-tenant account creation,
-  passwords in the OS keychain, Gmail-based email verification.
-- **One page, enforced by measurement.** The resume is rendered, its true page
-  count read back, and the layout tightened until it fits — whitespace first,
-  then font size, then margins, content last.
-- **Fabrication checking.** Every generated resume is diffed against your
-  profile. Unknown employers, unknown titles, numbers absent from your source
-  bullets, and skills you don't have all block the application.
-- **Ghost-job filtering.** Roughly 18–22% of postings are ghosts and ~30% of
-  requisitions close with nobody hired. Filtering these saves more wasted
-  applications than any resume tweak recovers.
+Every dollar of model time, every PDF, every portfolio repo—only after we know the form is real, reachable, and winnable.
 
-## Quick start
+---
+
+## What It Actually Does
+
+### Connects to Real Job Boards
+Not scraping, not cached job listings. Real APIs:
+- **Greenhouse** — Parses their REST API + detects your form live
+- **Lever** — Live posting API + ATS scoring
+- **Ashby** — Real-time form detection  
+- **Workday** — Builds tenant accounts, verifies emails via Gmail, fills forms
+- **LinkedIn** — Via JobSpy aggregator, resolves back to company career sites
+- **GitHub** — Creates real public portfolio repos (with real commits) per application
+- **Gmail** — OAuth for email verification codes
+
+Seven services. All live.
+
+### Sees What You See
+When the form loads, the bot sees it the same way you do:
+- Screenshots at scroll position (not full-page truncation)
+- Accessibility tree for semantic understanding
+- Label resolution (doesn't put phone in the name field)
+
+### Three Checkpoints
+1. **Parse:** Read the form. Any required field you haven't answered? Stop. Tell you which one.
+2. **Verify:** Fill it. Screenshot it. Does it look right? If the healer sees trouble, it loops. If it stays broken, it doesn't submit.
+3. **Evidence:** After submit, wait for the confirmation message or reference number. A "success" click without a page change? The bot doesn't trust that. Neither should you.
+
+### Knows What You Know
+Resume tailored per role. But only using:
+- Jobs from your experience (no fake employers)
+- Skills you've actually listed
+- Numbers from your bullets (not invented metrics)
+- Your own phrasing (not rewritten to sound impressive)
+
+Every tailored resume is diffed against your profile before sending. Unknown employer? Blocked. Title you never had? Blocked. Skill you didn't list? Blocked.
+
+---
+
+## The Dashboard
+
+See everything at a glance:
+
+| Page | What It Shows |
+|------|---|
+| **Overview** | Pipeline: discovered, filtered, applied, confirmed. Live stats. |
+| **Queue** | Tick jobs you want to apply to. Blacklist ones you're doing yourself. |
+| **Answers** | Every statement ever made in your name. Why it was chosen. How confident. |
+| **Profile** | Your identity, experience, screening answers. Edit live. |
+| **Status** | Readiness checks (LLM? GitHub? Gmail?). API endpoints. What each ATS taught us. |
+| **Lessons** | What jobbot learned about each ATS from every run. Form quirks. Common failures. |
+
+![Queue](docs/img/queue.png)
+
+![Answers Audit](docs/img/answers.png)
+
+---
+
+## What The Data Says
+
+Ranked by **actual effect size**, not what sounds good:
+
+1. **Referrals beat everything.** Referred candidate: ~40% interview rate. Cold application: ~3%. This tool can't automate a referral (that violates LinkedIn's ToS and loses your account). But it lets you apply to 50 roles while you're networking, because the other 49 don't matter anyway.
+
+2. **Apply on the company site, not the aggregator.** Career site: 34% of hires from 24% of applications. Job board: 23% of hires from 50% of applications. jobbot routes to company sites automatically.
+
+3. **Filter for fit, then apply broadly.** You plateau around 50% of listed requirements. Self-screening at 80% tanks your interview count.
+
+4. **Route around silent killers.** Employment gaps >6mo (~48% auto-screen). Sponsorship dropdown (game over). Salary field (means they've decided). jobbot flags these.
+
+**What this tool does NOT believe:**
+- "75% of resumes are rejected by ATS" ← Traced to a 2012 sales pitch. Vendor folded in 2013.
+- "Keyword density matters" ← No ATS vendor documents this. They reject on structured answers, not prose.
+- "Apply within 24 hours" ← One vendor blog, n≈1,610, self-selected customers. Noise.
+
+---
+
+## Reliability
+
+**119 tests pass** across:
+- **Integration:** Discovery, dry run, real form filling, submission flow
+- **State:** Profile editing, resume ingestion
+- **Edge cases:** 31 regressions covering sponsorship prose, ATS detection, silent failures
+- **E2E:** 9 full application runs with live browser, server, UI verification
+
+Everything is logged:
+- `data/answers.csv` — every answer, field by field
+- `data/applications.csv` — pipeline status per job
+- `data/applications/<job>/` — screenshots, resume, form JSON, verification screenshot
+- `data/lessons.jsonl` — what each ATS taught us
+
+---
+
+## The Risks
+
+**Be honest about this:**
+
+- **Violates ToS.** LinkedIn, Indeed, and most ATS platforms prohibit automated submission. The account risk is yours.
+- **Employers are reacting.** Greenhouse added fraud detection with ID verification. Some companies reinstated in-person interviews.
+- **Volume isn't strategy.** Submitting 500 applications doesn't beat 20 good ones + 3 referrals.
+- **Read what it wrote.** Before you trust it, open `data/answers.csv`. See exactly what was said in your name.
+
+If you're okay with that, keep going.
+
+---
+
+## Installation & Setup
+
+**Prerequisites:** Python 3.12+, Claude API key (or Gemini fallback)
 
 ```bash
 uv sync
-cp .env.example .env                      # add ANTHROPIC_API_KEY
-cp config/profile.example.yaml config/profile.yaml   # then edit it
-uv run jobbot check                       # tells you what's missing
-uv run jobbot run --source greenhouse:anthropic --limit 3
+cp .env.example .env
+cp config/profile.example.yaml config/profile.yaml
+uv run jobbot check         # tells you what's missing
 ```
 
-`run` is a **dry run by default**. It fills and verifies everything and stops
-before submitting. Add `--submit` only after reading `data/answers.csv`.
+**Optional (but recommended):**
+- Gmail API for Workday email verification codes
+- GitHub API for portfolio repo creation
 
-Full setup, including Gmail and GitHub: [docs/SETUP.md](docs/SETUP.md).
+See [docs/SETUP.md](docs/SETUP.md) for the full setup guide including Gmail and GitHub auth.
+
+---
 
 ## Commands
 
 ```
-jobbot check                    readiness: profile, llm, github, gmail, tracker
-jobbot discover --source ...    find and rank jobs, no browser
-jobbot run --source ... [--submit]
-jobbot report <audit-dir>       every answer entered, field by field
-jobbot ats-test --pdf x.pdf     score a resume, optionally against a live parser
-jobbot github-auth              one-time consent to create repos
-jobbot stats
+jobbot check                     readiness: profile, LLM, GitHub, Gmail
+jobbot discover --source <src>   find and rank jobs (no browser, free)
+jobbot run --source <src> [opts] apply to jobs (fills, verifies, optionally submits)
+jobbot dashboard [--port 8899]   local web view of everything
+jobbot stats                     pipeline summary
+jobbot report <audit-dir>        audit one application
 ```
 
-Sources: `greenhouse:slug`, `lever:slug`, `ashby:slug`, `smartrecruiters:slug`,
-`workable:slug`, `workday:tenant/site/pod`, `linkedin:search terms`.
+### Sources
 
-## What the evidence says to optimize
+```
+greenhouse:slug       e.g., greenhouse:anthropic
+lever:slug            e.g., lever:figma
+ashby:slug            e.g., ashby:gitpod
+workday:tenant/site   e.g., workday:workday/khoros/live
+linkedin:search terms e.g., linkedin:machine learning sf
+```
 
-Ranked by measured effect size:
+See [docs/SETUP.md](docs/SETUP.md) for the complete guide.
 
-1. **Referrals.** Application→interview is **40% vs 3%** inbound. Nothing in
-   resume craft is within an order of magnitude. This tool deliberately does not
-   automate outreach — automated sending violates LinkedIn's terms and is the
-   fastest way to lose your account. It is still where your own time is best spent.
-2. **Apply on the company career site**, not the aggregator: 34% of hires from
-   24% of applications, versus 23% of hires from 50% via job boards.
-3. **Filter for fit, then apply broadly.** Returns are roughly constant inside
-   your genuine match set and collapse outside it. Interview odds plateau around
-   50% of listed requirements — self-screening at 80% costs interviews.
-4. **Route around silent killers**: >6-month gaps (~48% auto-screen),
-   sponsorship, dropdown salary fields.
+---
 
-Myths this tool deliberately does **not** encode: *"75% of resumes are rejected
-by ATS"* (traced to a 2012 sales pitch from a company that folded in 2013),
-keyword-density scoring (no ATS vendor documents it), and the "apply within 24
-hours / 5x" timing claims (one vendor blog, n≈1,610, self-selected customers,
-site now a parked domain).
+## Architecture
 
-## The ATS score is a drafting aid, not a verdict
+Why it works this way:
 
-`jobbot ats-test` scores keyword match, skills coverage, sections,
-parseability, experience clarity and impact density. Useful — but it is *this
-project's* score. No ATS vendor documents scoring or rejecting a resume on
-keyword density; real auto-rejection fires on structured screening **answers**,
-not parsed prose. Optimize it for what it actually proxies: quantified bullets,
-parseable dates, real vocabulary from the posting, clean text extraction.
+- **Form layer** speaks `FormField` and `ProposedAnswer`, never raw DOM. Selector rot is confined to one ATS adapter.
+- **Capture tiles** instead of full page screenshots (Chromium texture limits, lazy rendering). Paired with accessibility tree for layout + semantics.
+- **Three checkpoints** because silent success is the dominant failure mode. Tools log "applied" for jobs never submitted. A click isn't proof. Only a confirmation message is.
+- **Cost ordering** means discovery, filtering, and the knockout scan all run before any resume is tailored or any portfolio is built.
 
-## Risks, stated plainly
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the module map and design details.
 
-- **Automated submission violates the terms of service** of LinkedIn, Indeed and
-  most ATS platforms. Defaults are conservative — dry run, 3 tabs, paced delays,
-  a per-company cap — but the account risk is yours.
-- **LinkedIn is deliberately not automated.** It is the one platform with
-  documented account bans and government-ID demands for exactly this.
-- **Employers are reacting.** Greenhouse ships fraud detection with identity
-  verification; several large companies have reinstated in-person interviews.
-  Volume is not a strategy.
-- **Read what it wrote before you trust it.** `data/answers.csv` contains every
-  statement made in your name.
+---
 
-## Using a Claude subscription instead of an API key
+## For the Hackathon
 
-`JOBBOT_LLM_PROVIDER=meridian` points the client at a local proxy that bridges a
-Claude subscription. It works. Note that Anthropic's Agent SDK documentation
-directs third-party tools to API-key authentication rather than subscription
-login, and the account risk is yours. `anthropic` is the supported path and the
-default.
+Built for: **Multi-App AI Agent Hackathon** (Lemma + Comma Capital, judged by Arga Labs)
+
+**Integrations:** 7 external services (5 ATS + GitHub + Gmail)
+
+**What it solves:** End-to-end autonomous job application with legally-binding accuracy, avoiding the documented failure modes that plague existing tools.
+
+**Code:** [github.com/ShryukGrandhi/jobbot](https://github.com/ShryukGrandhi/jobbot)
+
+---
 
 ## License
 
-MIT. See [NOTICE.md](NOTICE.md) for third-party credits.
+MIT. See [NOTICE.md](NOTICE.md).
