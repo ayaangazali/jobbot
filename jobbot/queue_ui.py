@@ -35,9 +35,9 @@ border-radius:6px;padding:5px 11px;font:inherit;cursor:pointer}
 .filters a.on{color:var(--fg);text-decoration:underline}
 td.tick{width:30px;text-align:center}
 input[type=checkbox]{width:15px;height:15px;accent-color:var(--acc);cursor:pointer}
-tr.row-approved td{background:#131e17}
-tr.row-blacklist td{opacity:.45}
-tr.row-applied td{background:#151922}
+tr.row-approved td{background:#e4f5e9}
+tr.row-blacklist td{opacity:.45;background:#f3f3f5}
+tr.row-applied td{background:#e8ecff}
 .d-approved{color:var(--ok);border-color:#2c4a35}
 .d-blacklist{color:var(--bad);border-color:#4a2b2b}
 .d-applied{color:var(--acc);border-color:#26405e}

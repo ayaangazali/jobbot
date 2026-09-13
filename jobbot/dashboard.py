@@ -33,6 +33,22 @@ import structlog
 log = structlog.get_logger(__name__)
 
 CSS = """
+/* app.css flips its palette under prefers-color-scheme: dark, which put black
+   text on a near-black cell. The collage is a light paper design -- pin it. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #ffffff; --color-bg-secondary: #f4f4fb;
+    --color-text: #000000; --color-text-secondary: #3a3a4a;
+    --color-border: #000000;
+  }
+}
+table { background: #fff; }
+thead th { background: #f4f4fb; color: #000; }
+tbody tr { background: #fff; }
+tbody tr:nth-child(even) { background: #f7f7fd; }
+td, th { background: transparent; color: #000; }
+td.dim, .dim { color: #55506b; }
+
 *{box-sizing:border-box}
 a{color:var(--ink);text-decoration:none}
 a:hover{text-decoration:underline}

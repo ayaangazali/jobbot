@@ -6,6 +6,7 @@
    this file from a feature worktree without saying so. */
 
 :root {
+  color-scheme: only light;   /* paper design: never invert */
   /* canvas */
   --paper:        rgb(224, 224, 255);   /* page background, the one constant */
   --ink:          #000;
