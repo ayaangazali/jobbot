@@ -26,6 +26,17 @@ import json
 from typing import Any
 
 CSS = """
+/* legibility: never put text directly on a scene (docs/design/README rule 2) */
+.step h1, .step h2, .step > p:first-of-type, .step .sub, .step .lede {
+  position: relative;
+  display: inline-block;
+  background: rgba(255,255,255,0.92);
+  border: 2px solid #000;
+  padding: 12px 16px;
+  border-radius: 4px;
+  box-shadow: 4px 4px 0 #000;
+}
+
 :root{
   --ease-out:cubic-bezier(0.23,1,0.32,1);
 }
