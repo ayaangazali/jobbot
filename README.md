@@ -1,8 +1,8 @@
 # jobbot
 
-### ▶ [Watch the demo](https://www.loom.com/share/95634502167648e7a41c4e298fb7a736)
+### ▶ [Watch the demo](https://www.loom.com/share/ba249f7a6ef44f8299da296888ea533e)
 
-[![Watch the demo](https://cdn.loom.com/sessions/thumbnails/95634502167648e7a41c4e298fb7a736-e22be6383758dfb2.jpg)](https://www.loom.com/share/95634502167648e7a41c4e298fb7a736)
+[![Watch the demo](https://cdn.loom.com/sessions/thumbnails/ba249f7a6ef44f8299da296888ea533e-67ddc19d222c176c-full-play.jpg)](https://www.loom.com/share/ba249f7a6ef44f8299da296888ea533e)
 
 **You spend 3 hours filling out applications. The bot spends 3 hours doing it right.**
 
