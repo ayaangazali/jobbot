@@ -175,18 +175,22 @@ def e(s: Any) -> str:
 
 def page(title: str, active: str, body: str, *, refresh: int = 0) -> bytes:
     nav = "".join(
-        f'<a href="{p}" class="{"on" if p == active else ""}">{n}</a>'
+        f'<a href="{p}" class="{"active" if p == active else ""}">{n}</a>'
         for p, n in NAV
     )
     meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ""
     return (
-        f"<!doctype html><html><head><meta charset=utf-8>{meta}"
+        f"<!doctype html><html><head><meta charset=utf-8><meta name='viewport' content='width=device-width, initial-scale=1'>{meta}"
         f'<link rel="icon" href="data:,">'
-        f"<title>jobbot — {e(title)}</title><style>{CSS}</style></head><body>"
-        f"<header><b>jobbot</b><nav>{nav}</nav>"
-        f'<span class=dim style="margin-left:auto">'
-        f'{datetime.now().strftime("%H:%M:%S")}</span></header>'
-        f"<main>{body}</main></body></html>"
+        f"<title>jobbot — {e(title)}</title>"
+        f'<link rel="stylesheet" href="/static/app.css">'
+        f"<style>{CSS}</style></head><body>"
+        f'<div id="app">'
+        f'<nav role="navigation" aria-label="main">{nav}</nav>'
+        f"<main>{body}</main>"
+        f'</div>'
+        f'<script src="/static/app.js"></script>'
+        f"</body></html>"
     ).encode()
 
 
@@ -298,6 +302,38 @@ class Dash:
         log.info("dashboard.standard_resume_saved", bytes=len(body), name=name[:80])
         return {"ok": True, "kb": len(body) // 1024}
 
+    def pipeline_strip(self, apps: list[dict]) -> str:
+        """Render a visual strip of application pipeline stages."""
+        order = ["discovered", "filtered_out", "needs_human", "prepared", "filling",
+                 "knockout_fail", "failed", "ghost_suspected", "unreachable",
+                 "submitted", "confirmed"]
+        counts = {s: 0 for s in order}
+        for a in apps:
+            status = a.get("status", "discovered")
+            if status in counts:
+                counts[status] += 1
+        
+        # Generate stage blocks
+        stages = []
+        for stage in order:
+            count = counts.get(stage, 0)
+            if count > 0:  # Only show stages with items
+                cls = "stage"
+                if stage in ("confirmed",):
+                    cls += " complete"
+                elif stage in ("submitted", "prepared", "filling"):
+                    cls += " active"
+                stages.append(
+                    f'<div class="{cls}" data-stage="{stage}">'
+                    f'{e(stage.replace("_", " ").title())}: {count}'
+                    f'</div>'
+                )
+        
+        if not stages:
+            return ""
+        
+        return f'<div data-component="pipeline" class="pipeline">' \
+               f'{"".join(stages)}</div>'
     def overview(self) -> bytes:
         apps = self.apps()
         ans = self.answers()
@@ -358,12 +394,15 @@ class Dash:
                 f'</span>',
             ])
 
+        pipeline = self.pipeline_strip(apps)
         return page("overview", "/", banner + "<h2>run</h2>" + head
+                    + (f"<h2>pipeline</h2>{pipeline}" if pipeline else "")
                     + "<h2>postings</h2>"
                     + table(["status", "role", "company", "ats", "fit", "fields",
                              "blank", "heals", "outcome", "when"], rows,
                             "no applications.csv yet — run `jobbot discover` or `jobbot run`"),
                     refresh=10)
+
 
     def app_detail(self, dirname: str) -> bytes:
         d = self.data / "applications" / dirname
@@ -749,6 +788,35 @@ class Dash:
                 ".pdf": "application/pdf"}[target.suffix.lower()]
         return target.read_bytes(), mime
 
+    def serve_static(self, rel: str) -> tuple[bytes, str] | None:
+        """Serve static CSS, JS, images from jobbot/static/ directory.
+        
+        Path is untrusted: refuse anything that escapes static/ or is a symlink.
+        """
+        root = (Path(__file__).parent / "static").resolve()
+        try:
+            target = (root / unquote(rel)).resolve()
+            target.relative_to(root)
+        except (ValueError, OSError):
+            return None
+        if not target.is_file():
+            return None
+        mime = {
+            ".css": "text/css; charset=utf-8",
+            ".js": "application/javascript; charset=utf-8",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".avif": "image/avif",
+            ".svg": "image/svg+xml",
+            ".woff": "font/woff",
+            ".woff2": "font/woff2",
+            ".mp4": "video/mp4",
+        }.get(target.suffix.lower(), "application/octet-stream")
+        return target.read_bytes(), mime
+
 
 # -- server --------------------------------------------------------------
 
@@ -788,8 +856,33 @@ class Handler(BaseHTTPRequestHandler):
         path, qs = u.path, parse_qs(u.query)
         d = self.dash
         try:
-            if path == "/":
+            if path.startswith("/static/"):
+                result = d.serve_static(path[8:])
+                if result:
+                    body, mime = result
+                    self._send(body, mime)
+                else:
+                    self._send(b"not found", "text/plain", 404)
+            elif path == "/":
                 self._send(d.overview())
+            elif path == "/landing":
+                landing_file = Path(__file__).parent.parent / "templates" / "landing.html"
+                if landing_file.exists():
+                    self._send(landing_file.read_bytes(), "text/html")
+                else:
+                    self._send(b"landing page not found", "text/plain", 404)
+            elif path == "/landing2":
+                landing_file = Path(__file__).parent.parent / "templates" / "landing2.html"
+                if landing_file.exists():
+                    self._send(landing_file.read_bytes(), "text/html")
+                else:
+                    self._send(b"landing2 page not found", "text/plain", 404)
+            elif path == "/landing3":
+                landing_file = Path(__file__).parent.parent / "templates" / "landing3.html"
+                if landing_file.exists():
+                    self._send(landing_file.read_bytes(), "text/html")
+                else:
+                    self._send(b"landing3 page not found", "text/plain", 404)
             elif path.startswith("/app/"):
                 self._send(d.app_detail(unquote(path[5:])))
             elif path == "/queue":

@@ -1,0 +1,10 @@
+# commit: 804b73dd7948
+# author: Phase 0-2 scaffolding, Shell UI, Onboarding tests
+# date: 2026-09-13
+7d2c83de08d54dbb696587319f78be99f314e75ff833b7077efc3709cb765f61  conftest.py
+484bcdc9d19181e166a1868788d853d092fb2c62e2446605f1e4af08cf057e17  test_dashboard_overview.py
+be9c6dc41d07fbd1d6d664bbab23dc30e972266a15254f7e5e4c9514e039cf0f  test_shell_overview.py
+8ec51fbba8ace7ce6ae95ac7fe58e182892153c302c49971074164b384ff2b14  test_onboarding.py
+639c4d5be0f401d7c73e1863c56476ddc8d634f107de10354e8250373ea0972a  test_inbox.py
+f4d298d8bac665711a9320c8309892df369ea2b8499f2c69123da0cda5a91072  test_queue.py
+e6f39befe0cd72e1e60569bcbf3d352581643dad89643e612d1d9521e4f5a4ab  test_integrations.py

@@ -219,8 +219,19 @@ class LLMClient:
                 timeout=LLM_TIMEOUT_S,
                 max_retries=0,
             )
+        elif self.provider == "fake":
+            from jobbot.llm.fake import FakeLLM
+            fake_path = os.environ.get("JOBBOT_FAKE_LLM")
+            if not fake_path:
+                raise LLMError("JOBBOT_LLM_PROVIDER=fake requires JOBBOT_FAKE_LLM env var")
+            log_path = os.environ.get("JOBBOT_FAKE_LLM_LOG")
+            self.client = FakeLLM(fake_path, log_path)
+        elif self.provider == "none":
+            # For testing: provider that exists but always fails. Lets tests verify
+            # fallback logic and error handling without calling fake or real backends.
+            self.client = None  # type: ignore[assignment]
         else:
-            raise LLMError(f"unknown provider {self.provider!r} (use 'meridian' or 'anthropic')")
+            raise LLMError(f"unknown provider {self.provider!r} (use 'anthropic', 'meridian', 'fake', or 'none')")
 
         log.info("llm.init", provider=self.provider, model=self.model)
 
@@ -300,6 +311,21 @@ class LLMClient:
         # than making every caller remember to.
         use_stream = kwargs["max_tokens"] >= STREAM_THRESHOLD_TOKENS
 
+        # Fake and none providers short-circuit before API call
+        if self.provider == "fake":
+            resp = self.client.call(system=system, blocks=list(blocks), tool=tool,
+                                    max_tokens=kwargs["max_tokens"])
+            return LLMResponse(
+                text=resp.text,
+                tool_input=resp.tool_input,
+                thinking=resp.thinking,
+                input_tokens=resp.input_tokens,
+                output_tokens=resp.output_tokens,
+                cache_read_tokens=resp.cache_read_tokens,
+                cache_write_tokens=resp.cache_write_tokens,
+            )
+        if self.provider == "none":
+            raise LLMError("provider=none does not support calls")
         try:
             if use_stream:
                 with self.client.messages.stream(**kwargs) as stream:
