@@ -189,7 +189,7 @@ def read_csv(path: Path) -> list[dict[str, str]]:
 
 def read_json(path: Path) -> Any:
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return None
 
@@ -198,7 +198,7 @@ def read_jsonl(path: Path, limit: int = 400) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     out = []
-    for line in path.read_text().splitlines()[-limit:]:
+    for line in path.read_text(encoding="utf-8").splitlines()[-limit:]:
         try:
             out.append(json.loads(line))
         except Exception:  # noqa: BLE001

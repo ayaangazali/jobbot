@@ -22,6 +22,7 @@ from typing import Any, Iterable, Sequence
 
 import httpx
 import structlog
+from dotenv import load_dotenv
 from anthropic import Anthropic
 from PIL import Image
 from tenacity import (
@@ -41,7 +42,7 @@ def _load_env(path: str = ".env") -> None:
         p = Path(__file__).resolve().parents[2] / ".env"
     if not p.exists():
         return
-    for line in p.read_text().splitlines():
+    for line in p.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             k, v = line.split("=", 1)
@@ -189,6 +190,7 @@ class LLMClient:
         max_tokens: int = 8000,
         fallback: str | None = None,
     ) -> None:
+        load_dotenv()   # idempotent; never overrides a real env var
         self.provider = (provider or os.environ.get("JOBBOT_LLM_PROVIDER", "anthropic")).lower()
         self.model = model or os.environ.get("JOBBOT_LLM_MODEL", "claude-opus-5")
         self.max_tokens = max_tokens
@@ -211,27 +213,28 @@ class LLMClient:
                 max_retries=0,   # tenacity owns retries
             )
         elif self.provider == "anthropic":
-            key = os.environ.get("ANTHROPIC_API_KEY")
-            if not key:
-                raise LLMError("JOBBOT_LLM_PROVIDER=anthropic requires ANTHROPIC_API_KEY")
+            key = os.environ.get("ANTHROPIC_API_KEY", "")
+            if not key or key.endswith("..."):   # .env.example ships "sk-ant-..."
+                raise LLMError("JOBBOT_LLM_PROVIDER=anthropic requires a real "
+                               "ANTHROPIC_API_KEY in .env (or JOBBOT_LLM_PROVIDER=gemini)")
             self.client = Anthropic(
                 api_key=key,
                 timeout=LLM_TIMEOUT_S,
                 max_retries=0,
             )
-        elif self.provider == "fake":
-            from jobbot.llm.fake import FakeLLM
-            fake_path = os.environ.get("JOBBOT_FAKE_LLM")
-            if not fake_path:
-                raise LLMError("JOBBOT_LLM_PROVIDER=fake requires JOBBOT_FAKE_LLM env var")
-            log_path = os.environ.get("JOBBOT_FAKE_LLM_LOG")
-            self.client = FakeLLM(fake_path, log_path)
-        elif self.provider == "none":
-            # For testing: provider that exists but always fails. Lets tests verify
-            # fallback logic and error handling without calling fake or real backends.
-            self.client = None  # type: ignore[assignment]
+        elif self.provider == "gemini":
+            # Gemini as the primary, not just the fallback. Same adapter,
+            # same LLMResponse shape; the Anthropic client is simply never
+            # built, so no ANTHROPIC_API_KEY is needed.
+            if not os.environ.get("GEMINI_API_KEY"):
+                raise LLMError("JOBBOT_LLM_PROVIDER=gemini requires GEMINI_API_KEY")
+            self.client = None
+            self.model = os.environ.get("JOBBOT_GEMINI_MODEL", "gemini-2.5-pro")
+            self.fallback = "none"
+            self.fallback_active = True    # every call routes through _call_fallback
         else:
-            raise LLMError(f"unknown provider {self.provider!r} (use 'anthropic', 'meridian', 'fake', or 'none')")
+            raise LLMError(f"unknown provider {self.provider!r} "
+                           "(use 'anthropic', 'gemini' or 'meridian')")
 
         log.info("llm.init", provider=self.provider, model=self.model)
 
@@ -274,7 +277,7 @@ class LLMClient:
     @retry(
         retry=retry_if_exception_type(TransientLLMError),
         wait=wait_exponential(multiplier=3, min=3, max=120),
-        stop=stop_after_attempt(5),
+        stop=stop_after_attempt(8),   # ~5 min of backoff; a 503 storm outlasts 5 tries
         reraise=True,
     )
     def call(
@@ -311,21 +314,6 @@ class LLMClient:
         # than making every caller remember to.
         use_stream = kwargs["max_tokens"] >= STREAM_THRESHOLD_TOKENS
 
-        # Fake and none providers short-circuit before API call
-        if self.provider == "fake":
-            resp = self.client.call(system=system, blocks=list(blocks), tool=tool,
-                                    max_tokens=kwargs["max_tokens"])
-            return LLMResponse(
-                text=resp.text,
-                tool_input=resp.tool_input,
-                thinking=resp.thinking,
-                input_tokens=resp.input_tokens,
-                output_tokens=resp.output_tokens,
-                cache_read_tokens=resp.cache_read_tokens,
-                cache_write_tokens=resp.cache_write_tokens,
-            )
-        if self.provider == "none":
-            raise LLMError("provider=none does not support calls")
         try:
             if use_stream:
                 with self.client.messages.stream(**kwargs) as stream:
@@ -386,6 +374,14 @@ class LLMClient:
         from jobbot.llm.gemini import call_gemini
 
         res = call_gemini(system=system, blocks=blocks, tool=tool, max_tokens=max_tokens)
+        if tool is not None and res.get("tool_input") is None:
+            # A forced tool call that came back as prose (or nothing) is a
+            # blip -- Gemini does this on a fraction of vision requests --
+            # and a re-ask costs seconds, whereas surfacing it cost a live
+            # run a full navigate-and-refill pass.
+            raise TransientLLMError(
+                f"gemini returned no tool call for {tool.get('name')}; "
+                f"text was: {str(res.get('text', ''))[:200]!r}")
         log.info("llm.fallback_used", model=res["model"])
         return LLMResponse(
             text=res["text"], tool_input=res["tool_input"], thinking="",

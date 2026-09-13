@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import structlog
+from dotenv import load_dotenv
 
 from jobbot.browser.session import BrowserConfig, BrowserSession
 from jobbot.discovery.sources import Discovery, JobPost, ghost_score
@@ -82,12 +83,23 @@ def cmd_discover(args) -> int:
     rows = []
     for p in posts:
         rows.append((fit_score(profile, p) if profile else 0.0, ghost_score(p, posts), p))
+    # Discovery feeds the dashboard queue, so the candidate can tick jobs at
+    # /queue before anything opens a browser. Needs no API key: the queue is a
+    # shortlist, not a run.
+    queue = JobQueue(Path(args.csv).parent / "queue.json")
+    queue.add_posts(posts, {p.job_id: fit for fit, _, p in rows})
+    if profile is not None:
+        queue.decide_many({p.job_id: "blacklist" for p in posts
+                           if profile.excludes(p.company)})
+    queue.save()
     rows.sort(key=lambda r: r[0], reverse=True)
     print(f"{'fit':>5} {'ghost':>6}  {'ats':<12} {'company':<18} title")
     for m, g, p in rows[: args.limit]:
         flag = " GHOST?" if g > 0.6 else ""
         print(f"{m:5.2f} {g:6.2f}  {p.ats.value:<12} {p.company[:18]:<18} {p.title[:52]}{flag}")
     print(f"\n{len(posts)} postings from {len(args.source)} source(s)")
+    print(f"queue: {queue.counts()}  -- tick jobs at /queue on `jobbot dashboard`, "
+          "then `jobbot run --approved`")
     return 0
 
 
@@ -163,7 +175,6 @@ def cmd_run(args) -> int:
     profile = Profile.load(args.profile)
     posts = asyncio.run(_collect(args.source, 200))
     tracker = Tracker(args.csv)
-    llm = LLMClient()
 
     data_dir = Path(args.csv).parent
     queue = JobQueue(data_dir / "queue.json")
@@ -188,6 +199,7 @@ def cmd_run(args) -> int:
             return 0
 
     standard = _standard_resume(args, data_dir)
+    llm = LLMClient()   # after the queue gate: "nothing approved" needs no key
 
     cfg = RunConfig(
         # Everything a run writes -- audit dirs, answers.csv, lessons.jsonl --
@@ -213,7 +225,18 @@ def cmd_run(args) -> int:
         await session.start()
         try:
             orch = Orchestrator(profile, session, llm, tracker, cfg)
-            return await orch.run(posts, limit=args.limit)
+            results = await orch.run(posts, limit=args.limit)
+            kept = session.kept_tabs
+            if kept:
+                print(f"\n{len(kept)} application(s) left OPEN in the browser -- "
+                      "filled, not submitted, waiting on you:")
+                for k in kept:
+                    print(f"  - {k}")
+                print("\nEach needs an answer only you can give (see blockers.txt in "
+                      "its audit dir). Fill it in the tab, or set it at /edit on the "
+                      "dashboard and re-run. Ctrl-C closes the browser.")
+                await asyncio.Event().wait()
+            return results
         except HaltWithTabOpen as halt:
             print(f"\nHALTED on {halt.job_id} with the tab still open:")
             for b in halt.blockers:
@@ -303,6 +326,15 @@ def cmd_dashboard(args) -> int:
     return 0
 
 
+def cmd_ui(args) -> int:
+    """The brutalist UI: dashboard, queue, intake, editor and a live browser."""
+    from jobbot.ui.server import serve
+
+    serve(Path(args.csv).parent, args.profile, port=args.port,
+          open_browser=not args.no_open, host=args.host)
+    return 0
+
+
 def cmd_stats(args) -> int:
     t = Tracker(args.csv)
     s = t.stats()
@@ -314,6 +346,9 @@ def cmd_stats(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # .env is where SETUP.md tells people to put their keys. Nothing else
+    # reads it; without this line every documented key is silently ignored.
+    load_dotenv()
     p = argparse.ArgumentParser(prog="jobbot", description="Autonomous job application agent")
     p.add_argument("--profile", default=str(DEFAULT_PROFILE))
     p.add_argument("--csv", default=str(DEFAULT_CSV))
@@ -344,8 +379,10 @@ def main(argv: list[str] | None = None) -> int:
                                     "(default: data/standard_resume.pdf if present)")
     r.add_argument("--tailor", action="store_true",
                    help="generate a resume per application instead of sending the standard one")
-    r.add_argument("--attempts", type=int, default=1,
-                   help="work the same application up to N times before moving on")
+    r.add_argument("--attempts", type=int, default=0,
+                   help="max tries per application, retried in the same tab "
+                        "with backoff (default 0 = keep trying until it settles, "
+                        "max 25)")
     r.add_argument("--persist", action="store_true",
                    help="work one application until it submits; on failure stop "
                         "with the tab open instead of moving on")
@@ -373,6 +410,12 @@ def main(argv: list[str] | None = None) -> int:
                            "tailnet can reach it (never 0.0.0.0)")
     dash.add_argument("--host", default="127.0.0.1", help=argparse.SUPPRESS)
     dash.set_defaults(func=cmd_dashboard)
+
+    ui = sub.add_parser("ui", help="the UI: queue, intake, editor, answers and a live browser")
+    ui.add_argument("--port", type=int, default=8766)
+    ui.add_argument("--no-open", action="store_true", help="do not open a browser")
+    ui.add_argument("--host", default="127.0.0.1", help=argparse.SUPPRESS)
+    ui.set_defaults(func=cmd_ui)
 
     s = sub.add_parser("stats", help="summarize the tracker")
     s.set_defaults(func=cmd_stats)

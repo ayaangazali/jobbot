@@ -24,7 +24,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 @pytest.fixture(scope="module")
 def profile() -> Profile:
     return Profile.model_validate(
-        yaml.safe_load((ROOT / "config" / "profile.example.yaml").read_text())
+        yaml.safe_load((ROOT / "config" / "profile.example.yaml").read_text(encoding="utf-8"))
     )
 
 
@@ -340,7 +340,7 @@ def test_a_selector_survives_an_id_that_starts_with_a_digit() -> None:
     import re
     from pathlib import Path
 
-    js = Path("jobbot/forms/extract.py").read_text()
+    js = Path("jobbot/forms/extract.py").read_text(encoding="utf-8")
     assert 'return `[id="${attrEsc(el.id)}"]`' in js, \
         "the id selector must be an attribute selector, which needs no escaping"
     assert not re.search(r'label\[for="\$\{esc\}"\]', js), \
@@ -438,7 +438,7 @@ def test_every_module_imports_what_it_uses() -> None:
               "shutil", "traceback", "unicodedata", "csv", "html", "base64", "io"}
     problems = []
     for path in sorted(Path("jobbot").rglob("*.py")):
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         imported: set[str] = set()
         for n in ast.walk(tree):
             if isinstance(n, ast.Import):
@@ -515,6 +515,8 @@ def test_only_unsettled_failures_are_retried() -> None:
                                  "legally significant answer missing from profile"))
 
     assert _worth_retrying(r(Status.NEEDS_HUMAN.value, "verification not clean"))
+    assert not _worth_retrying(r(Status.NEEDS_HUMAN.value,
+                                 "awaiting candidate: Agreement to Arbitrate"))
     assert _worth_retrying(r(Status.UNREACHABLE.value, "Timeout 8000ms exceeded"))
     assert _worth_retrying(r(Status.FAILED.value, "sign-in did not take"))
 
@@ -675,3 +677,363 @@ def test_a_rate_limit_is_not_retried() -> None:
     # An ordinary timeout is still worth another go.
     assert _worth_retrying(ApplicationResult(
         "oracle:2", Status.UNREACHABLE.value, "navigation timeout"))
+
+
+def test_both_ledgers_round_trip_through_the_file_lock(tmp_path) -> None:
+    """The trackers lock a sidecar file around every write.
+
+    The lock helper was swapped for a cross-platform one and the import was
+    added to one tracker but not the other; nothing exercised the on-disk
+    path, so the first real run died with NameError inside upsert().
+    """
+    from jobbot.tracker.answers_csv import AnswerLog
+    from jobbot.tracker.csv_tracker import Application, Status, Tracker
+
+    t = Tracker(tmp_path / "applications.csv")
+    t.upsert(Application(job_id="gh:1", company="Acme", title="SWE",
+                         ats="greenhouse", status=Status.DISCOVERED.value))
+    t.upsert(Application(job_id="gh:1", company="Acme", title="SWE",
+                         ats="greenhouse", status=Status.FILTERED_OUT.value))
+    rows = t.all()
+    assert len(rows) == 1 and rows[0].status == Status.FILTERED_OUT.value
+
+    a = AnswerLog(tmp_path / "answers.csv")
+    n = a.record(job_id="gh:1", company="Acme", title="SWE", ats="greenhouse",
+                 job_url="https://x", answers=[{"label": "First Name", "value": "Jane"}])
+    assert n == 1 and a.for_job("gh:1")[0]["answer"] == "Jane"
+    assert (tmp_path / "applications.lock").exists()
+
+
+def test_the_context_never_loses_its_last_window(tmp_path, monkeypatch) -> None:
+    """Chromium on Windows/Linux exits when its last window closes.
+
+    Closing the launch-time blank page, or the last leased tab between two
+    applications, took the whole persistent context down with
+    "BrowserContext.new_page: Target page, context or browser has been closed".
+    A blank keeper page must therefore survive start(), every tab lease, and
+    orphan reaping.
+    """
+    import asyncio
+
+    from jobbot.browser import session as mod
+
+    class FakePage:
+        def __init__(self, ctx, url="about:blank"):
+            self.ctx, self.url, self.closed = ctx, url, False
+        def is_closed(self):
+            return self.closed
+        async def close(self):
+            self.closed = True
+            self.ctx.pages.remove(self)
+
+    class FakeCtx:
+        def __init__(self):
+            self.pages = [FakePage(self)]
+        def set_default_navigation_timeout(self, ms): pass
+        def set_default_timeout(self, ms): pass
+        async def new_page(self):
+            if not self.pages:
+                raise RuntimeError("Target page, context or browser has been closed")
+            p = FakePage(self); self.pages.append(p); return p
+        async def close(self):
+            self.pages.clear()
+
+    fake = FakeCtx()
+    launch_blank = fake.pages[0]
+
+    async def fake_launch(profile_dir, **kwargs):
+        return fake
+
+    monkeypatch.setattr(mod, "launch_persistent_context_async", fake_launch)
+    sess = mod.BrowserSession(mod.BrowserConfig(profile_dir=tmp_path / "p"))
+
+    async def scenario():
+        await sess.start()
+        assert launch_blank in fake.pages, "the launch blank page must be kept"
+        assert sess.total_pages == 0, "the keeper is not a leased tab"
+
+        for _ in range(3):                      # three applications in a row
+            async with sess.tab("app") as page:
+                page.url = "https://example.com/apply"
+                assert sess.live_tabs == 1
+            assert fake.pages, "closing the leased tab must not close the last window"
+
+        await sess.reap_orphans()
+        assert fake.pages and not fake.pages[0].is_closed(), "reaping must spare the keeper"
+
+        async with sess.tab("x"):
+            await launch_blank.close()          # something ate the keeper
+        assert fake.pages, "a lost keeper is recreated before the tab closes"
+
+    asyncio.run(scenario())
+
+
+def test_an_application_is_retried_in_its_own_tab_until_it_settles(tmp_path, monkeypatch) -> None:
+    """A crash mid-form used to close the tab and file the job as failed.
+
+    Now the same tab is reused: two crashes, one unhealed result, then a
+    dry-run success must come back as the success, with the tab never
+    released in between. A settled result (knockout) must not be retried,
+    and a tab that is actually gone must be reported as such so the outer
+    loop can lease a new one.
+    """
+    import asyncio
+
+    from jobbot import orchestrator as mod
+    from jobbot.orchestrator import ApplicationResult, Orchestrator, RunConfig
+    from jobbot.tracker.csv_tracker import Status
+
+    monkeypatch.setattr(mod, "_retry_delay", lambda attempt: 0.0)
+
+    class Page:
+        closed = False
+        def is_closed(self): return self.closed
+
+    class Post:
+        job_id, company, url, title = "gh:1", "Acme", "https://x/apply", "SWE"
+
+    class Tracker:
+        def __init__(self): self.updates = []
+        def update(self, jid, **kw): self.updates.append(kw)
+
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.cfg = RunConfig(data_dir=tmp_path)
+    orch.tracker = Tracker()
+    audit = tmp_path / "a"; audit.mkdir()
+
+    script = [RuntimeError("gemini 503: high demand, please try again later"),
+              RuntimeError("Timeout 60000ms exceeded"),
+              ApplicationResult("gh:1", Status.FAILED.value, "2 required fields unhealed"),
+              ApplicationResult("gh:1", "dry_run", "verified but not submitted")]
+    calls = []
+
+    async def fake_apply(page, post, audit_, shots):
+        calls.append(page)
+        step = script.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        return step
+
+    orch._apply_in_tab = fake_apply
+    page = Page()
+    r = asyncio.run(orch._apply_with_retries(page, Post(), audit, audit / "s"))
+    assert r.status == "dry_run"
+    assert len(calls) == 4 and all(c is page for c in calls), "same tab every time"
+    assert (audit / "error.txt").read_text(encoding="utf-8").count("--- attempt") == 2
+    assert any(u.get("status") == Status.FILLING.value and "retry 2/25" in u["error"]
+               for u in orch.tracker.updates)
+
+    # settled: a knockout is final, no second try
+    script[:] = [ApplicationResult("gh:1", Status.KNOCKOUT_FAIL.value, "sponsorship")]
+    calls.clear()
+    r = asyncio.run(orch._apply_with_retries(page, Post(), audit, audit / "s"))
+    assert r.status == Status.KNOCKOUT_FAIL.value and len(calls) == 1
+
+    # the budget is honoured when --attempts is given
+    orch.cfg = RunConfig(data_dir=tmp_path, attempts_per_job=2)
+    script[:] = [RuntimeError("a"), RuntimeError("b"), RuntimeError("c")]
+    calls.clear()
+    r = asyncio.run(orch._apply_with_retries(page, Post(), audit, audit / "s"))
+    assert r.status == Status.FAILED.value and len(calls) == 2
+
+    # a dead tab is reported, not retried in place
+    dead = Page(); dead.closed = True
+    script[:] = [RuntimeError("Target page, context or browser has been closed")]
+    r = asyncio.run(orch._apply_with_retries(dead, Post(), audit, audit / "s"))
+    assert r.reason.startswith("tab died")
+
+
+def test_healer_reapplies_profile_values_and_snaps_declines(monkeypatch, tmp_path) -> None:
+    """Two blockers seen on a live Greenhouse form, both previously unhealable.
+
+    "Agreement to Arbitrate" is legally significant, so the healer refused to
+    touch it -- even though the profile held a confirmed "Yes" and the box had
+    simply not taken the first click. And for "Gender" the verifier suggested
+    "I do not wish to answer" where the form's option is "Decline To Self
+    Identify"; the filler resolves that, the healer did not. Both must heal
+    now, the first from the profile and never from the model.
+    """
+    import asyncio
+
+    from jobbot.forms import fill as fill_mod
+    from jobbot.forms.model import (AnswerSource, FieldKind, FieldOption, FormField,
+                                    ParsedForm, Verification, VerificationIssue)
+    from jobbot.healer import checkpoints as ck
+    from jobbot.profile import Profile
+
+    arb = FormField("arb", "Agreement to Arbitrate", FieldKind.CONSENT, required=True)
+    gender = FormField("g", "Gender", FieldKind.SELECT, options=[
+        FieldOption("Male"), FieldOption("Female"), FieldOption("Decline To Self Identify")])
+    form = ParsedForm(fields=[arb, gender])
+    prof = Profile.model_validate({
+        "identity": {"first_name": "J", "last_name": "D", "email": "j@d.com"},
+        "screening": {"arbitration_agreement": "Yes"},
+    })
+
+    rounds = []
+
+    async def fake_verify(page, llm, profile, form_, answers, shots, *, round_no):
+        rounds.append(round_no)
+        if round_no == 1:
+            return Verification(issues=[
+                VerificationIssue("arb", "Agreement to Arbitrate", "unchecked", "blocker", None),
+                VerificationIssue("g", "Gender", "empty", "blocker", "I do not wish to answer"),
+            ]), None
+        return Verification(ready_to_submit=True), None
+
+    applied = []
+
+    async def fake_apply(page, f, patch, resume_path=None):
+        applied.append((f.field_id, patch))
+        return True
+
+    monkeypatch.setattr(ck, "checkpoint_verify", fake_verify)
+    monkeypatch.setattr(fill_mod, "apply_answer", fake_apply)
+
+    answers: list = []
+    v, n = asyncio.run(ck.heal(None, None, prof, form, answers, tmp_path, max_rounds=3))
+    assert v.ready_to_submit and n == 2 and rounds == [1, 2]
+
+    by = {fid: patch for fid, patch in applied}
+    assert by["arb"].source is AnswerSource.PROFILE, "the candidate's own answer, not the model's"
+    assert by["arb"].value not in (None, "", False)
+    assert by["g"].value == "Decline To Self Identify"
+    assert {a.field_id for a in answers} == {"arb", "g"}, "healed values reach the ledger"
+
+
+def test_a_confirmed_yes_ticks_a_lone_consent_checkbox() -> None:
+    """Greenhouse's arbitration agreement is one checkbox whose only option is
+    the sentence "Please read the arbitration agreement below". The profile's
+    confirmed "Yes" matched none of that text, so a live run filed it as
+    "needs human" -- twice per pass -- and could never verify clean.
+    """
+    from jobbot.forms.model import FieldKind, FieldOption, FormField, ParsedForm
+    from jobbot.healer.answer import deterministic_answers
+    from jobbot.profile import Profile
+
+    prof = Profile.model_validate({
+        "identity": {"first_name": "J", "last_name": "D", "email": "j@d.com"},
+        "screening": {"arbitration_agreement": "Yes", "policy_acknowledgement": False},
+    })
+    arb = FormField("a", "Please read the arbitration agreement below", FieldKind.CHECKBOX,
+                    required=True, options=[FieldOption("Please read the arbitration agreement below")])
+    arb2 = FormField("b", "Agreement to Arbitrate", FieldKind.CONSENT, required=True)
+    pol = FormField("c", "I acknowledge the AI policy", FieldKind.CHECKBOX,
+                    options=[FieldOption("I acknowledge the AI policy")])
+    # the live Greenhouse shape: a combobox whose single option is the sentence
+    sentence = "I have read and agree to the arbitration agreement"
+    combo = FormField("d", "Agreement to Arbitrate", FieldKind.COMBOBOX, required=True,
+                      options=[FieldOption(sentence)])
+    answers, leftover = deterministic_answers(prof, ParsedForm(fields=[arb, arb2, pol, combo]))
+    by = {a.field_id: a for a in answers}
+    assert by["a"].value is True and by["a"].submittable
+    assert by["b"].value is True and by["b"].submittable
+    assert by["c"].value is False, "a confirmed No leaves the box alone"
+    assert by["d"].value == sentence and by["d"].submittable, "a Yes picks the only option"
+    assert leftover == []
+
+
+def test_an_essay_mentioning_your_stack_is_not_a_placeholder() -> None:
+    """The healer rejected a real 1,250-character "Why us?" answer because
+    the placeholder regex matched "your " mid-sentence. Descriptions of a
+    value open with a possessive or an adjective; real prose merely contains
+    them.
+    """
+    from jobbot.healer.checkpoints import _looks_like_a_description as desc
+
+    assert not desc("Anthropic is building infrastructure for research that matters. "
+                    "I am proficient in Python, Go and PostgreSQL, which seem to be "
+                    "core to your stack. The feedback loop you describe is compelling.")
+    assert not desc("I rebuilt their ingestion path and cut p99 latency to 95ms.")
+    assert desc("Candidate's real phone number")
+    assert desc("your current address")
+    assert desc("The actual value should be entered here")
+    assert desc("[insert company name]")
+    assert desc("TBD")
+    assert desc("")
+
+
+def test_the_dom_overrules_vision_on_a_scrolled_textarea() -> None:
+    """A 1,250-character essay shows four lines in its box. Vision called it
+    "visibly truncated" and blocked; three heal rounds re-typed the same full
+    text and got the same verdict. The DOM knows the whole value.
+    """
+    import asyncio
+
+    from jobbot.forms.model import (AnswerSource, FieldKind, FormField, ParsedForm,
+                                    ProposedAnswer, VerificationIssue)
+    from jobbot.healer.checkpoints import _dom_truth
+
+    essay = "Anthropic is building infrastructure for research that matters. " * 20
+    why = FormField("q1", "Why Anthropic?", FieldKind.TEXTAREA, required=True, selector="#q1")
+    phone = FormField("q2", "Phone", FieldKind.PHONE, required=True, selector="#q2")
+    form = ParsedForm(fields=[why, phone])
+    answers = [ProposedAnswer("q1", essay, AnswerSource.COMPOSED, 1.0, "x"),
+               ProposedAnswer("q2", "555", AnswerSource.PROFILE, 1.0, "x")]
+
+    class Loc:
+        def __init__(self, v): self.v = v; self.first = self
+        async def input_value(self, timeout=0): return self.v
+
+    class Page:
+        def locator(self, sel): return Loc(essay if sel == "#q1" else "55")
+
+    issues = [VerificationIssue("q1", "Why Anthropic?", "The answer is visibly truncated.", "blocker", essay),
+              VerificationIssue("q2", "Phone", "visibly truncated", "blocker", "555"),
+              VerificationIssue("q1", "Why Anthropic?", "empty", "blocker", None)]
+    out, confirmed = asyncio.run(_dom_truth(Page(), form, answers, issues))
+    assert out[0].severity == "warning" and "DOM holds" in out[0].problem
+    assert out[1].severity == "blocker", "a phone box is not a scrolled essay"
+    assert out[2].severity == "blocker", "only truncation claims are overruled"
+    assert confirmed == {"why anthropic?"}
+
+
+def test_voluntary_self_id_is_declined_not_invented(monkeypatch, tmp_path) -> None:
+    """Gender and race are optional EEO fields the verifier lists in
+    unfilled_required (no field_id, so the blocker loop never sees them). The
+    profile holds no gender or race and must not. Declining is the honest
+    non-answer; veteran/disability status, being legally significant, are left
+    to the profile.
+    """
+    import asyncio
+
+    from jobbot.forms import fill as fill_mod
+    from jobbot.forms.model import (AnswerSource, FieldKind, FieldOption, FormField,
+                                    ParsedForm, Verification)
+    from jobbot.healer import checkpoints as ck
+    from jobbot.profile import Profile
+
+    gender = FormField("g", "Gender", FieldKind.SELECT, options=[
+        FieldOption("Male"), FieldOption("Female"), FieldOption("Decline To Self Identify")])
+    race = FormField("r", "Please identify your race", FieldKind.SELECT, options=[
+        FieldOption("Asian"), FieldOption("White"), FieldOption("Decline To Self Identify")])
+    vet = FormField("v", "Veteran Status", FieldKind.SELECT, options=[
+        FieldOption("I am a protected veteran"),
+        FieldOption("I am not a protected veteran"), FieldOption("Decline To Self Identify")])
+    form = ParsedForm(fields=[gender, race, vet])
+    prof = Profile.model_validate({
+        "identity": {"first_name": "J", "last_name": "D", "email": "j@d.com"},
+        "screening": {"veteran_status": "I am not a protected veteran"}})
+
+    async def fake_verify(page, llm, profile, form_, answers, shots, *, round_no):
+        if round_no == 1:
+            return Verification(ready_to_submit=False,
+                                unfilled_required=["Gender", "Please identify your race",
+                                                   "Veteran Status"]), None
+        return Verification(ready_to_submit=True), None
+
+    applied = []
+
+    async def fake_apply(page, f, patch, resume_path=None):
+        applied.append((f.field_id, patch.value)); return True
+
+    monkeypatch.setattr(ck, "checkpoint_verify", fake_verify)
+    monkeypatch.setattr(fill_mod, "apply_answer", fake_apply)
+
+    answers: list = []
+    v, n = asyncio.run(ck.heal(None, None, prof, form, answers, tmp_path, max_rounds=3))
+    by = dict(applied)
+    assert by["g"] == "Decline To Self Identify"
+    assert by["r"] == "Decline To Self Identify"
+    assert "v" not in by, "veteran status is legally significant; the profile owns it"
+    assert v.ready_to_submit

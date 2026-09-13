@@ -22,13 +22,37 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
 import structlog
 
 log = structlog.get_logger(__name__)
+
+
+STALE_DAYS = 120
+
+
+def is_stale(posted: str, *, today: date | None = None) -> bool:
+    """True when the source's posted date is older than STALE_DAYS."""
+    if not posted:
+        return False
+    try:
+        d = date.fromisoformat(posted[:10])
+    except ValueError:
+        return False
+    return ((today or date.today()) - d).days > STALE_DAYS
+
+
+def _rank(x: QueueEntry) -> tuple:
+    # posted is ISO YYYY-MM-DD, so string order is date order; negate via
+    # reversal-free trick: sort ascending on the stale flag, descending on fit,
+    # and descending on date by using a tuple of the inverted date parts.
+    posted = x.posted[:10] if x.posted else "0000-00-00"
+    newest_first = tuple(-int(part) for part in posted.split("-") if part.isdigit())
+    return (x.decision != "approved", is_stale(x.posted), -x.fit, newest_first, x.company)
+
 
 DECISIONS = ("pending", "approved", "blacklist", "applied")
 
@@ -89,7 +113,7 @@ class JobQueue:
         if not self.path.exists():
             return
         try:
-            raw = json.loads(self.path.read_text() or "{}")
+            raw = json.loads(self.path.read_text(encoding="utf-8") or "{}")
         except (OSError, json.JSONDecodeError) as exc:
             # A corrupt queue must not wipe the candidate's decisions on the
             # next write, so refuse to start from empty.
@@ -102,14 +126,20 @@ class JobQueue:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(
-            {k: v.to_dict() for k, v in self._entries.items()}, indent=1))
+            {k: v.to_dict() for k, v in self._entries.items()}, indent=1), encoding="utf-8")
         tmp.replace(self.path)
 
     # -- reading ----------------------------------------------------------
 
     def all(self) -> list[QueueEntry]:
-        return sorted(self._entries.values(),
-                      key=lambda x: (x.decision != "approved", -x.fit, x.company))
+        """Approved first, then fresh rows by fit, then stale rows by fit.
+
+        Fit alone put a 2021 posting above a last-week one at the same score.
+        Roughly 18-22% of postings are ghosts and a stale date is the
+        strongest cheap signal, so anything older than STALE_DAYS sinks below
+        every fresh row. Undated rows count as fresh: unknown is not evidence.
+        """
+        return sorted(self._entries.values(), key=_rank)
 
     def get(self, job_id: str) -> QueueEntry | None:
         return self._entries.get(job_id)

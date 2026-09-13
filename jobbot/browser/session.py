@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -58,6 +59,42 @@ class BrowserConfig:
     extra_launch_kwargs: dict[str, Any] = field(default_factory=dict)
 
 
+
+def _pid_alive(pid: int) -> bool:
+    """Existence check that never signals the process.
+
+    POSIX: `kill(pid, 0)` is the documented probe. Windows: `os.kill` with
+    signal 0 is *not* a probe there -- it calls TerminateProcess -- so open a
+    query-only handle instead.
+    """
+    if pid <= 0:
+        return False
+    if sys.platform != "win32":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True              # alive, owned by someone else
+        return True
+    import ctypes
+    from ctypes import wintypes
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    k32 = ctypes.windll.kernel32
+    k32.OpenProcess.restype = wintypes.HANDLE
+    h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not h:
+        return False
+    try:
+        code = wintypes.DWORD()
+        STILL_ACTIVE = 259
+        if k32.GetExitCodeProcess(h, ctypes.byref(code)):
+            return code.value == STILL_ACTIVE
+        return True
+    finally:
+        k32.CloseHandle(h)
+
+
 class BrowserSession:
     """Owns the single persistent context and rations tabs across coroutines."""
 
@@ -68,6 +105,20 @@ class BrowserSession:
         self._live: set[Any] = set()          # tabs currently leased out
         self._launched_at: float | None = None
         self._start_lock = asyncio.Lock()
+        # One blank page that lives as long as the context. On Windows and
+        # Linux, Chromium exits when its last window closes, and Playwright
+        # then reports the whole persistent context as closed. Closing the
+        # launch-time about:blank page, or the last leased tab between two
+        # applications, therefore killed the run with
+        # "BrowserContext.new_page: Target page, context or browser has been
+        # closed". macOS keeps the process alive with no windows, which is why
+        # this never showed up there. The keeper is not counted against the
+        # tab budget and is never reaped.
+        self._keeper: Any = None
+        # Tabs the orchestrator asked to leave standing: a filled form that
+        # needs the candidate. Released from the budget, never closed by
+        # tab()/reap_orphans(); closed only by close().
+        self._kept: dict[Any, str] = {}
 
     def _singleton_holder(self) -> int | None:
         """PID currently holding this profile, if one is alive.
@@ -86,13 +137,7 @@ class BrowserSession:
             pid = int(pid_s)
         except ValueError:
             return None
-        try:
-            os.kill(pid, 0)          # signal 0: existence check, no effect
-        except ProcessLookupError:
-            return None
-        except PermissionError:
-            return pid               # alive, owned by someone else
-        return pid
+        return pid if _pid_alive(pid) else None
 
     def _clear_stale_lock(self) -> bool:
         """Remove singleton files left by a process that no longer exists."""
@@ -160,14 +205,16 @@ class BrowserSession:
             self.ctx.set_default_timeout(self.config.nav_timeout_ms)
             self._launched_at = time.time()
 
-            # A persistent context launches with a blank page attached. Close it
-            # rather than pooling it: leasing one shared page to concurrent
-            # callers is a race, and keeping it as a spare silently makes the
-            # real ceiling max_tabs + 1.
-            for p in list(self.ctx.pages):
-                if p.url in ("about:blank", ""):
-                    with contextlib.suppress(Exception):
-                        await p.close()
+            # A persistent context launches with a blank page attached. It is
+            # never leased out (sharing it between callers would be a race);
+            # it stays open as the keeper so the context outlives every tab.
+            # Any extra blanks beyond the first are closed.
+            blanks = [p for p in self.ctx.pages if p.url in ("about:blank", "")]
+            for p in blanks[1:]:
+                with contextlib.suppress(Exception):
+                    await p.close()
+            self._keeper = blanks[0] if blanks else None
+            await self._ensure_keeper()
 
             log.info(
                 "browser.start",
@@ -175,6 +222,14 @@ class BrowserSession:
                 headless=self.config.headless,
                 max_tabs=self.config.max_tabs,
             )
+
+    async def _ensure_keeper(self) -> None:
+        """Make sure a blank page is open before anything else closes."""
+        if self.ctx is None:
+            return
+        if self._keeper is None or self._keeper.is_closed():
+            with contextlib.suppress(Exception):
+                self._keeper = await self.ctx.new_page()
 
     async def close(self) -> None:
         if self.ctx is None:
@@ -189,9 +244,21 @@ class BrowserSession:
     def live_tabs(self) -> int:
         return len(self._live)
 
+    def keep(self, page: Any, label: str) -> None:
+        """Leave this tab open after its lease ends, with its work intact."""
+        self._kept[page] = label
+        log.warning("browser.tab_kept", label=label, kept=len(self._kept))
+
+    @property
+    def kept_tabs(self) -> list[str]:
+        return [lbl for pg, lbl in self._kept.items() if not pg.is_closed()]
+
     @property
     def total_pages(self) -> int:
-        return len(self.ctx.pages) if self.ctx is not None else 0
+        """Pages open in the context, not counting the keeper."""
+        if self.ctx is None:
+            return 0
+        return sum(1 for p in self.ctx.pages if p is not self._keeper)
 
     @contextlib.asynccontextmanager
     async def tab(self, label: str = "tab", *, keep_open_on: tuple = ()) -> AsyncIterator[Any]:
@@ -224,10 +291,14 @@ class BrowserSession:
             # asked for the tab to stay open.
             if not keep and page is not None:
                 self._live.discard(page)
-                with contextlib.suppress(Exception):
-                    if not page.is_closed():
-                        await page.close()
-                log.debug("browser.tab_closed", label=label, live=len(self._live))
+                if page in self._kept:
+                    log.debug("browser.tab_released_open", label=label)
+                else:
+                    await self._ensure_keeper()   # never close the last window
+                    with contextlib.suppress(Exception):
+                        if not page.is_closed():
+                            await page.close()
+                    log.debug("browser.tab_closed", label=label, live=len(self._live))
             self._sem.release()
 
     async def reap_orphans(self) -> int:
@@ -241,6 +312,8 @@ class BrowserSession:
             return 0
         killed = 0
         for p in list(self.ctx.pages):
+            if p is self._keeper or p in self._kept:
+                continue
             if p not in self._live and not p.is_closed():
                 with contextlib.suppress(Exception):
                     await p.close()

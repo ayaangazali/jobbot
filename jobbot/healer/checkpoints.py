@@ -34,6 +34,7 @@ import structlog
 
 from jobbot.browser import capture as cap
 from jobbot.forms.model import (
+    AnswerSource,
     FieldKind, FormField, ParsedForm, ProposedAnswer,
     Verification, VerificationIssue,
 )
@@ -42,7 +43,7 @@ from jobbot.llm.client import LLMClient, cached_system
 from jobbot.llm.schemas import (
     KNOCKOUT_TOOL, PARSE_FORM_TOOL, POST_SUBMIT_TOOL, VERIFY_FORM_TOOL,
 )
-from jobbot.forms.matching import match_option
+from jobbot.forms.matching import is_decline, match_decline, match_option
 from jobbot.profile import LEGALLY_SIGNIFICANT, Profile
 
 
@@ -65,10 +66,15 @@ class Outcome:
     lessons: list[dict[str, str]] = dc_field(default_factory=list)
 
 
+# Two kinds of marker. Anywhere in the string: things no real answer
+# contains. Only at the START: possessives and adjectives that open a
+# description ("the candidate's phone", "your real address") but also occur
+# mid-sentence in every honest essay ("core to your stack") -- matching those
+# anywhere rejected a 1,250-character cover-letter answer as a placeholder.
 _DESCRIPTION_MARKERS = re.compile(
-    r"candidate'?s|the user'?s|real |actual |valid |their |your |"
     r"\bplaceholder\b|\bTBD\b|\bN/?A\b|<[^>]+>|\[[^\]]+\]|"
-    r"should be|must be|needs to be|enter (a|the|your)",
+    r"\bshould be\b|\bmust be\b|\bneeds to be\b|\benter (a|an|the|your)\b|"
+    r"^\s*(the |a |an )?(candidate'?s?|user'?s?|applicant'?s?|real|actual|valid|their|your)\b",
     re.I,
 )
 
@@ -338,6 +344,61 @@ def _confirmed_screening(profile) -> str:
             + "\n".join(lines))
 
 
+
+_TRUNCATED = re.compile(r"truncat|cut off|incomplete|partial|not fully", re.I)
+
+
+def _norm_ws(v: object) -> str:
+    return re.sub(r"\s+", " ", str(v or "")).strip()
+
+
+async def _dom_value(page: Any, f: FormField) -> str:
+    """What the control actually holds, straight from the DOM."""
+    if page is None or not f.selector:
+        return ""
+    try:
+        return await page.locator(f.selector).first.input_value(timeout=2000) or ""
+    except Exception:  # noqa: BLE001
+        try:
+            return await page.evaluate(
+                "(sel) => { const e = document.querySelector(sel); "
+                "return e ? (e.value || e.textContent || '') : ''; }", f.selector)
+        except Exception:  # noqa: BLE001
+            return ""
+
+
+async def _dom_truth(page: Any, form: ParsedForm, answers: list[ProposedAnswer],
+                     issues: list[VerificationIssue]) -> tuple[list[VerificationIssue], set[str]]:
+    """Let the DOM overrule vision on "truncated" text.
+
+    A long essay in a textarea shows its first few lines; the vision pass
+    reads that as "visibly truncated" and blocks. Three heal rounds then
+    re-type the same complete text and get the same verdict. The DOM holds
+    the whole value, so when it matches what we meant to type the issue is
+    a warning, not a blocker. Returns the issues and the labels confirmed.
+    """
+    by_id = {f.field_id: f for f in form.fields}
+    intended = {a.field_id: _norm_ws(a.value) for a in answers if a.submittable}
+    out: list[VerificationIssue] = []
+    confirmed: set[str] = set()
+    for i in issues:
+        f = by_id.get(i.field_id)
+        if (i.severity == "blocker" and f is not None
+                and f.kind in (FieldKind.TEXT, FieldKind.TEXTAREA)
+                and _TRUNCATED.search(i.problem or "") and i.field_id in intended):
+            dom = _norm_ws(await _dom_value(page, f))
+            want = intended[i.field_id]
+            if dom and (dom == want or (len(dom) >= 0.95 * len(want)
+                                        and want.startswith(dom[:200]))):
+                log.info("verify.dom_truth", label=f.label[:50], chars=len(dom))
+                i = VerificationIssue(i.field_id, i.label,
+                                      (i.problem or "") + " (DOM holds the full value; the box scrolls)",
+                                      "warning", i.suggested_value)
+                confirmed.add(f.label.strip().lower()[:60])
+        out.append(i)
+    return out, confirmed
+
+
 async def checkpoint_verify(
     page: Any, llm: LLMClient, profile: Profile, form: ParsedForm,
     answers: list[ProposedAnswer], shots_dir: str | Path, round_no: int = 0,
@@ -417,11 +478,21 @@ async def checkpoint_verify(
             suggested_value=i.get("suggested_value"),
         ))
 
+    issues, confirmed = await _dom_truth(page, form, answers, issues)
+    unfilled = [u for u in (d.get("unfilled_required", []) or [])
+                if str(u).strip().lower()[:60] not in confirmed]
+    verrs = d.get("validation_errors", []) or []
+    ready = bool(d.get("ready_to_submit"))
+    if confirmed and not ready and not verrs and not unfilled \
+            and not any(i.severity == "blocker" for i in issues):
+        # The only thing holding the verdict back was vision misreading a
+        # scrolled box; the DOM says the value is whole.
+        ready = True
     v = Verification(
-        ready_to_submit=bool(d.get("ready_to_submit")),
+        ready_to_submit=ready,
         issues=issues,
-        unfilled_required=d.get("unfilled_required", []) or [],
-        validation_errors=d.get("validation_errors", []) or [],
+        unfilled_required=unfilled,
+        validation_errors=verrs,
         summary=d.get("summary", ""),
     )
     log.info("checkpoint2.verified", round=round_no, ready=v.ready_to_submit,
@@ -471,6 +542,7 @@ async def heal(
     by_id = {f.field_id: f for f in form.fields}
     rounds = 0
     v = Verification()
+    det_by_id: dict[str, Any] | None = None   # profile answers, computed on demand
 
     for rounds in range(1, max_rounds + 1):
         v, _ = await checkpoint_verify(page, llm, profile, form, answers,
@@ -484,8 +556,16 @@ async def heal(
             f = by_id.get(issue.field_id)
             if f is None:
                 continue
+            value: Any = None
+            source, confidence, why = AnswerSource.COMPOSED, 0.6, "healer fix"
+            if f.profile_key is None:
+                # The fill stage classifies every field in place; a field that
+                # reaches the healer unclassified (a late-appearing step, a
+                # test) must still be recognised as legally significant.
+                from jobbot.healer.answer import classify
+                classify(f)
             if f.profile_key in LEGALLY_SIGNIFICANT:
-                # Never let the healer rewrite a legally significant answer.
+                # Never let the healer COMPOSE a legally significant answer.
                 #
                 # Keyed on the profile's own denylist, not on the vision pass's
                 # legally_significant flag: vision marked "End date month" and
@@ -494,21 +574,34 @@ async def heal(
                 # ready_to_submit however many rounds it ran. What must never be
                 # model-authored is the fixed set of status questions, and those
                 # all carry a profile_key.
-                log.warning("heal.refused_legal", label=f.label[:60],
-                            key=f.profile_key)
+                #
+                # A confirmed profile value that simply did not stick -- a
+                # consent checkbox that ignored the first click, a combobox
+                # that closed early -- is the candidate's own answer, not the
+                # model's, and may be applied again verbatim.
+                if det_by_id is None:
+                    from jobbot.healer.answer import deterministic_answers
+                    det_by_id = {a.field_id: a for a in deterministic_answers(profile, form)[0]
+                                 if a.submittable}
+                again = det_by_id.get(f.field_id)
+                if again is None:
+                    log.warning("heal.refused_legal", label=f.label[:60],
+                                key=f.profile_key)
+                    continue
+                log.info("heal.reapplied_profile", label=f.label[:60], key=f.profile_key)
+                value = again.value
+                source, confidence, why = AnswerSource.PROFILE, 1.0, "profile value re-applied"
+            if value is None and issue.suggested_value in (None, ""):
                 continue
-            if issue.suggested_value in (None, ""):
-                continue
-            if _looks_like_a_description(str(issue.suggested_value)):
+            if value is None and _looks_like_a_description(str(issue.suggested_value)):
                 # The verifier sometimes answers with a description of the value
                 # ("Candidate's real phone number") instead of the value. Typing
                 # that into a live form is worse than leaving it blank.
                 log.warning("heal.rejected_placeholder", label=f.label[:50],
                             suggested=str(issue.suggested_value)[:60])
                 continue
-            from jobbot.forms.model import AnswerSource
-
-            value = issue.suggested_value
+            if value is None:
+                value = issue.suggested_value
             if f.options:
                 # Only a value from the list can be entered, and the verifier
                 # does invent ones that are not on it: for "How did you hear
@@ -520,6 +613,13 @@ async def heal(
                 # the control cannot hold.
                 labels = f.option_labels()
                 snapped, score, _ = match_option(str(value), labels)
+                if snapped is None and is_decline(value):
+                    # "I do not wish to answer" vs "Decline To Self Identify":
+                    # the filler already resolves these; the healer must too,
+                    # or every EEO field the verifier flags stays flagged.
+                    snapped = match_decline(labels)
+                    if snapped is not None:
+                        log.info("heal.decline_synonym", label=f.label[:50], chose=snapped)
                 if snapped is None:
                     from jobbot.healer.answer import model_answers
                     picked = await asyncio.to_thread(
@@ -538,14 +638,48 @@ async def heal(
                     continue
                 value = snapped
 
-            patch = ProposedAnswer(f.field_id, value,
-                                   AnswerSource.COMPOSED, 0.6, "healer fix")
+            patch = ProposedAnswer(f.field_id, value, source, confidence, why)
             if await apply_answer(page, f, patch, resume_path=resume_path):
                 # In place, not a rebind: the caller records this list as the
                 # ledger of what was actually entered, so a healed value that
                 # only existed in a local copy would never be recorded.
                 answers[:] = [a for a in answers if a.field_id != f.field_id] + [patch]
                 fixed += 1
+
+        # Voluntary self-identification the candidate never provided.
+        #
+        # Greenhouse's EEO block (Gender, "Please identify your race",
+        # Hispanic/Latino) is optional, but the verifier lists it in
+        # unfilled_required, and those carry no field_id so the blocker loop
+        # above never sees them. The profile holds no gender or race, and it
+        # must not: this is not a fact to invent. Declining is the honest,
+        # privacy-preserving non-answer every such field offers, and it is not
+        # legally significant -- unlike veteran or disability status, which are
+        # answered only from the profile and are skipped here.
+        label_to_field = {f.label.strip().lower(): f for f in form.fields}
+        for label in v.unfilled_required:
+            key = str(label).strip().lower()
+            f = label_to_field.get(key) or next(
+                (ff for lab, ff in label_to_field.items()
+                 if key and (key in lab or lab in key)), None)
+            if f is None or not f.options:
+                continue
+            if any(a.field_id == f.field_id and a.submittable for a in answers):
+                continue
+            if f.profile_key is None:
+                from jobbot.healer.answer import classify
+                classify(f)
+            if f.profile_key in LEGALLY_SIGNIFICANT:
+                continue
+            decline = match_decline(f.option_labels())
+            if decline is None:
+                continue
+            patch = ProposedAnswer(f.field_id, decline, AnswerSource.DERIVED, 0.9,
+                                   "voluntary self-ID left unprovided; declined, not invented")
+            if await apply_answer(page, f, patch, resume_path=resume_path):
+                answers[:] = [a for a in answers if a.field_id != f.field_id] + [patch]
+                fixed += 1
+                log.info("heal.declined_self_id", label=f.label[:50], chose=decline)
 
         log.info("heal.round", round=rounds, blockers=len(v.blockers), fixed=fixed)
         if fixed == 0:
