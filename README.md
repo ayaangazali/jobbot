@@ -1,5 +1,9 @@
 # jobbot
 
+### ▶ [Watch the demo](https://www.loom.com/share/b6030369547844788e7d24a78eda02ec)
+
+[![Watch the demo](https://cdn.loom.com/sessions/thumbnails/b6030369547844788e7d24a78eda02ec-3bedd19142bb7795.jpg)](https://www.loom.com/share/b6030369547844788e7d24a78eda02ec)
+
 **You spend 3 hours filling out applications. The bot spends 3 hours doing it right.**
 
 An autonomous job application agent that finds roles, reads each one, tailors your resume, answers every screening question, fills the form, verifies its work against the actual page, and submits—then shows you exactly what it said in your name.
@@ -42,8 +46,6 @@ It never makes anything up. Legally binding questions come only from your profil
 
 ```bash
 # Install
-git clone https://github.com/ShryukGrandhi/jobbot.git
-cd jobbot
 uv sync
 
 # Configure
@@ -120,8 +122,6 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for:
 **Multi-App AI Agent Hackathon** (Lemma + Comma Capital, judged by Arga Labs)
 
 **Integrations:** 7 services (5 ATS + GitHub + Gmail)
-
-**Code:** [github.com/ShryukGrandhi/jobbot](https://github.com/ShryukGrandhi/jobbot)
 
 ---
 
