@@ -33,56 +33,101 @@ import structlog
 log = structlog.get_logger(__name__)
 
 CSS = """
-:root{--bg:#0c0d10;--panel:#14161b;--line:#22252c;--fg:#d7dae0;--dim:#7c828e;
---ok:#5ec27a;--warn:#e0b341;--bad:#e0605e;--acc:#6aa9f0}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.5 ui-monospace,
-SFMono-Regular,Menlo,monospace}
-a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
-header{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);
-padding:10px 16px;display:flex;gap:18px;align-items:baseline;z-index:5}
-header b{font-size:15px;letter-spacing:.5px}
-nav a{margin-right:14px;color:var(--dim)}nav a.on{color:var(--fg)}
-main{padding:16px;max-width:1500px}
-h2{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--dim);
-margin:26px 0 8px;font-weight:400}
-h2:first-child{margin-top:0}
-.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
-.tile{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
-.tile .n{font-size:22px;line-height:1.15;overflow-wrap:anywhere}
-.tile .n.txt{font-size:15px;padding:3px 0 4px}
+a{color:var(--ink);text-decoration:none}
+a:hover{text-decoration:underline}
+
+#app{display:block;min-height:0}
+
+.hero{position:relative;overflow:hidden;min-width:0}
+.hero .decor::after{content:"";position:absolute;inset:0;
+background:linear-gradient(180deg,rgba(224,224,255,.2),rgba(224,224,255,.94) 88%)}
+.hero .decor img{width:100%;height:100%;object-fit:cover;display:block}
+
+.site-header{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:18px 24px}
+.site-header nav{display:flex;flex-wrap:wrap;gap:4px 16px;font-family:var(--f-body);
+background:none;border-bottom:none;position:static;padding:0;z-index:auto}
+.site-header nav a{color:var(--ink);font-size:14px;padding:4px 1px;background:none;
+border-radius:0;border-bottom:2px solid transparent}
+.site-header nav a:hover{border-bottom-color:var(--violet)}
+.site-header nav a.active{border-bottom-color:var(--violet);font-weight:700}
+
+main{padding:4px 24px 64px;max-width:1400px;margin:0 auto;flex:none;
+overflow-y:visible;min-width:0;width:auto}
+h2{font-size:15px;letter-spacing:.4px;margin:34px 0 12px}
+h2:first-child{margin-top:6px}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));
+gap:22px 18px;padding:8px 4px 14px}
+.tile{padding:14px 14px 12px}
+.tile .n{font-family:var(--f-display);font-weight:700;font-size:26px;
+line-height:1.15;overflow-wrap:anywhere}
+.tile .n.txt{font-size:16px;padding:3px 0 4px}
 .nw{white-space:nowrap}
-.tile .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
-table{width:100%;border-collapse:collapse;background:var(--panel);
-border:1px solid var(--line);border-radius:6px;overflow:hidden}
-th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);
+.tile .k{font-family:var(--f-body);color:#4a4664;font-size:11px;
+text-transform:uppercase;letter-spacing:.6px;margin-top:6px}
+
+.table-wrap{overflow-x:auto}
+table.plate{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #cdc8ef;
 vertical-align:top;max-width:520px;overflow-wrap:break-word}
-th{color:var(--dim);font-weight:400;font-size:11px;text-transform:uppercase;
-letter-spacing:.6px;white-space:nowrap}
+th{font-family:var(--f-label);font-weight:700;font-size:11px;text-transform:uppercase;
+letter-spacing:.6px;white-space:nowrap;border-bottom:2px solid var(--ink)}
+td{font-family:var(--f-body);font-size:13px}
 tr:last-child td{border-bottom:none}
-tr:hover td{background:#181b21}
-.pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;
-border:1px solid var(--line)}
-.s-confirmed{color:var(--ok);border-color:#2c4a35}
-.s-submitted{color:var(--warn);border-color:#4a4029}
-.s-needs_human,.s-knockout_fail{color:var(--warn);border-color:#4a4029}
-.s-failed,.s-unreachable{color:var(--bad);border-color:#4a2b2b}
-.s-prepared,.s-filling{color:var(--acc);border-color:#26405e}
-.s-filtered_out,.s-ghost_suspected,.s-discovered{color:var(--dim)}
-.dim{color:var(--dim)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
-pre{background:var(--panel);border:1px solid var(--line);border-radius:6px;
-padding:10px;overflow:auto;max-height:420px;margin:0;white-space:pre-wrap}
-.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px}
-.shots figure{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:6px;
-overflow:hidden}
-.shots img{width:100%;display:block;border-bottom:1px solid var(--line)}
-.shots figcaption{padding:5px 8px;color:var(--dim);font-size:11px}
-.bar{display:inline-block;vertical-align:middle;width:52px;height:6px;
-background:var(--line);border-radius:3px;overflow:hidden;margin-right:6px}
-.bar i{display:block;height:100%;background:var(--acc)}
-.empty{color:var(--dim);padding:14px;border:1px dashed var(--line);border-radius:6px}
-.banner{background:#1a2230;border:1px solid #26405e;border-radius:6px;padding:9px 12px;
-margin-bottom:14px;color:var(--acc)}
+tr:hover td{background:#f1efff}
+
+.pill{display:inline-block;padding:2px 9px;font-family:var(--f-body);font-weight:700;
+font-size:11px;letter-spacing:.4px;text-transform:uppercase;
+border:2px solid var(--ink);border-radius:2px;background:#fff}
+.s-confirmed{background:#d7f6dd}
+.s-submitted{background:#ffefb0}
+.s-needs_human,.s-knockout_fail{background:#ffddab}
+.s-failed,.s-unreachable{background:#ffd2e4;color:#7a0d2c}
+.s-prepared,.s-filling{background:#e3ddff}
+.s-filtered_out,.s-ghost_suspected,.s-discovered{background:#eae8f5;color:#4a4664}
+
+.dim{color:#4a4664}.ok{color:#0f7a42}.warn{color:#a5590a}.bad{color:#a3123a}
+
+pre{background:var(--plate-light);border:2px solid var(--ink);padding:10px;
+overflow:auto;max-height:420px;margin:0;white-space:pre-wrap;font-family:var(--f-body)}
+
+.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.shots figure{margin:0;background:var(--plate-light);border:2px solid var(--ink)}
+.shots img{width:100%;display:block;border-bottom:2px solid var(--ink)}
+.shots figcaption{padding:6px 8px;color:#4a4664;font-size:11px;font-family:var(--f-body)}
+
+.bar{display:inline-block;vertical-align:middle;width:52px;height:8px;
+background:#dcd8ff;border:1px solid var(--ink);margin-right:6px}
+.bar i{display:block;height:100%;background:var(--violet)}
+
+.empty{font-family:var(--f-body);color:#4a4664;padding:16px;
+border:2px dashed var(--ink);background:var(--plate-light)}
+.banner{font-family:var(--f-body);background:var(--plate-light);
+border:2px solid var(--violet);padding:10px 14px;margin-bottom:16px}
+
+/* pipeline strip: stops on a painted rail, echoing the intake step rail.
+   Reset app.css's generic [class*="stage"] placeholder card first. */
+.rail,.stage,.stage-stop,.stage-stop-active,.stage-n,.stage-label{background:none;
+border:none;padding:0;border-radius:0;gap:0;color:var(--ink)}
+.rail{display:flex;align-items:flex-end;flex-wrap:wrap;gap:0 2px;padding:14px 4px 6px;
+margin:0}
+.stage{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:78px}
+.stage-stop{position:relative;display:flex;align-items:center;justify-content:center;
+width:64px;height:48px}
+.stage-stop img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.stage-stop-active{background:var(--violet);border:2px solid var(--ink);
+box-shadow:var(--lift-black)}
+.stage-n{position:relative;z-index:1;display:inline;font-family:var(--f-label);
+font-weight:700;font-size:18px}
+.stage-stop-active .stage-n{color:#fff}
+.stage-label{font-family:var(--f-body);font-size:11px;text-align:center;
+text-transform:uppercase;letter-spacing:.4px;max-width:92px}
+.rail-connector{width:32px;height:32px;object-fit:contain;transform:rotate(90deg);
+align-self:center;margin:0 -4px 22px}
+
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 """
 
 NAV = [("/", "overview"), ("/queue", "queue"), ("/answers", "answers"), ("/profile", "profile"),
@@ -183,11 +228,25 @@ def page(title: str, active: str, body: str, *, refresh: int = 0) -> bytes:
         f"<!doctype html><html><head><meta charset=utf-8><meta name='viewport' content='width=device-width, initial-scale=1'>{meta}"
         f'<link rel="icon" href="data:,">'
         f"<title>jobbot — {e(title)}</title>"
+        f'<link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700'
+        f'&family=Space+Mono:wght@400;700&family=Nanum+Pen+Script'
+        f'&family=Zilla+Slab+Highlight:wght@400;700&display=swap" rel="stylesheet">'
+        f'<link rel="stylesheet" href="/static/collage.css">'
         f'<link rel="stylesheet" href="/static/app.css">'
-        f"<style>{CSS}</style></head><body>"
+        f"<style>{CSS}</style></head>"
+        f'<body class=collage>'
         f'<div id="app">'
+        f'<div class=hero>'
+        f'<div class=decor aria-hidden="true">'
+        f'<img src="/static/landing2/img/asset-8bd696a182.jpg" alt="">'
+        f'</div>'
+        f'<header class="site-header layer-content">'
+        f'<a class=logo-dot href="/landing2" title="jobbot home">jobbot</a>'
+        f'<h1 class=visually-hidden>jobbot — {e(title)}</h1>'
         f'<nav role="navigation" aria-label="main">{nav}</nav>'
-        f"<main>{body}</main>"
+        f'</header>'
+        f'</div>'
+        f'<main class=layer-content>{body}</main>'
         f'</div>'
         f'<script src="/static/app.js"></script>'
         f"</body></html>"
@@ -199,13 +258,14 @@ def pill(status: str) -> str:
 
 
 def tiles(pairs: list[tuple[str, Any]]) -> str:
-    def cell(k: str, v: Any) -> str:
-        # A count fits at 22px; a company name or a status word does not, and
+    def cell(k: str, v: Any, i: int) -> str:
+        # A count fits at 26px; a company name or a status word does not, and
         # clipping the tenant name is exactly the thing you opened this to read.
         cls = "n txt" if len(str(v)) > 7 else "n"
-        return (f'<div class=tile><div class="{cls}">{e(v)}</div>'
+        tilt = "tilt-a" if i % 2 == 0 else "tilt-b"
+        return (f'<div class="tile plate {tilt}"><div class="{cls}">{e(v)}</div>'
                 f'<div class=k>{e(k)}</div></div>')
-    return f'<div class=tiles>{"".join(cell(k, v) for k, v in pairs)}</div>'
+    return f'<div class=tiles>{"".join(cell(k, v, i) for i, (k, v) in enumerate(pairs))}</div>'
 
 
 def bar(frac: float) -> str:
@@ -218,7 +278,8 @@ def table(headers: list[str], rows: list[list[str]], empty: str = "nothing yet")
         return f'<div class=empty>{e(empty)}</div>'
     head = "".join(f"<th>{e(h)}</th>" for h in headers)
     body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>" for r in rows)
-    return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+    return (f'<div class=table-wrap><table class=plate>'
+            f'<thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>')
 
 
 def _outcome(a: dict[str, str]) -> str:
@@ -303,7 +364,12 @@ class Dash:
         return {"ok": True, "kb": len(body) // 1024}
 
     def pipeline_strip(self, apps: list[dict]) -> str:
-        """Render a visual strip of application pipeline stages."""
+        """Render pipeline stage counts as stops on a painted rail.
+
+        Cream-stroke stops for ordinary stages, a violet fill for the stage(s)
+        currently in flight (LIVE), joined by the yellow squiggle connector —
+        the same idiom as the intake step rail.
+        """
         order = ["discovered", "filtered_out", "needs_human", "prepared", "filling",
                  "knockout_fail", "failed", "ghost_suspected", "unreachable",
                  "submitted", "confirmed"]
@@ -312,28 +378,33 @@ class Dash:
             status = a.get("status", "discovered")
             if status in counts:
                 counts[status] += 1
-        
-        # Generate stage blocks
-        stages = []
-        for stage in order:
-            count = counts.get(stage, 0)
-            if count > 0:  # Only show stages with items
-                cls = "stage"
-                if stage in ("confirmed",):
-                    cls += " complete"
-                elif stage in ("submitted", "prepared", "filling"):
-                    cls += " active"
-                stages.append(
-                    f'<div class="{cls}" data-stage="{stage}">'
-                    f'{e(stage.replace("_", " ").title())}: {count}'
-                    f'</div>'
-                )
-        
-        if not stages:
+
+        shown = [s for s in order if counts[s] > 0]
+        if not shown:
             return ""
-        
-        return f'<div data-component="pipeline" class="pipeline">' \
-               f'{"".join(stages)}</div>'
+
+        stops = []
+        for i, stage in enumerate(shown):
+            count = counts[stage]
+            active = stage in LIVE
+            label = e(stage.replace("_", " ").title())
+            if active:
+                stop = ('<span class="stage-stop stage-stop-active tilt-c">'
+                        f'<b class=stage-n>{count}</b></span>')
+            else:
+                tilt = "tilt-a" if i % 2 == 0 else "tilt-b"
+                stop = (f'<span class="stage-stop {tilt}">'
+                        '<img src="/static/landing2/img/asset-2409278a72.gif" alt="">'
+                        f'<b class=stage-n>{count}</b></span>')
+            cls = "stage stage-active" if active else "stage"
+            stops.append(f'<div class="{cls}" data-stage="{stage}">{stop}'
+                         f'<span class=stage-label>{label}</span></div>')
+            if i < len(shown) - 1:
+                stops.append('<img class=rail-connector alt="" '
+                             'src="/static/landing2/img/asset-191a616ef1.gif">')
+
+        return f'<div data-component="pipeline" class=rail>{"".join(stops)}</div>'
+
     def overview(self) -> bytes:
         apps = self.apps()
         ans = self.answers()
