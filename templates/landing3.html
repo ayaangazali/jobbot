@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>jobbot — The application moves itself</title>
+<meta name="description" content="jobbot filters postings, tailors your resume, answers screening questions once, and submits fifty applications a week — with you reviewing every send.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f2efe5;
+    --ink:#2b2927;
+    --ink-soft:#736e6a;
+    --olive:#62654e;
+    --olive-ink:#3f4136;
+    --card-bg:#fdfbf5;
+    --panel-line:rgba(43,41,39,.10);
+    --pill-bg:rgba(230,224,206,.55);
+    --cream:#f2efe5;
+    --serif:'Instrument Serif', Georgia, serif;
+    --sans:'Inter', 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
+    --label:'Manrope', 'Inter', sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  .stage{max-width:1440px;margin:0 auto;padding:0 20px;}
+  .wrap{max-width:1200px;margin:0 auto;padding:0 24px;}
+  img,svg{display:block;max-width:100%;}
+  a{text-decoration:none;color:inherit;}
+
+  /* ---------- reveal-on-scroll ---------- */
+  .reveal{opacity:0;transform:translateY(28px);transition:opacity .7s cubic-bezier(.16,.8,.24,1), transform .7s cubic-bezier(.16,.8,.24,1);}
+  .reveal.is-visible{opacity:1;transform:translateY(0);}
+  @media (prefers-reduced-motion:reduce){
+    .reveal{opacity:1;transform:none;transition:none;}
+  }
+
+  /* ---------- top bar / hamburger nav ---------- */
+  .top-bar{display:flex;justify-content:center;padding:28px 0 8px;position:relative;z-index:40;}
+  .nav-wrap{position:relative;}
+  .menu-btn{
+    width:40px;height:40px;border-radius:10px;border:1px solid var(--panel-line);
+    background:rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;
+    cursor:pointer;position:relative;z-index:2;
+  }
+  .menu-btn svg{width:16px;height:16px;}
+  .nav-menu{
+    position:absolute;top:52px;left:50%;transform:translateX(-50%) translateY(-6px);
+    background:#fff;border:1px solid var(--panel-line);border-radius:14px;padding:10px;
+    display:flex;flex-direction:column;gap:2px;min-width:210px;
+    box-shadow:0 24px 48px rgba(43,41,39,.14);
+    opacity:0;pointer-events:none;transition:opacity .18s ease, transform .18s ease;
+  }
+  .nav-menu.open{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0);}
+  .nav-menu a.nav-link{padding:10px 12px;border-radius:8px;font-size:14px;font-weight:500;color:var(--ink);}
+  .nav-menu a.nav-link:hover{background:#f6f4ec;}
+  .nav-menu-actions{display:flex;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--panel-line);}
+  .btn-ghost-sm,.btn-dark-sm{flex:1;text-align:center;font-size:13px;font-weight:500;padding:9px 10px;border-radius:8px;}
+  .btn-ghost-sm{background:var(--bg);color:var(--ink);border:1px solid var(--panel-line);}
+  .btn-dark-sm{background:var(--olive);color:var(--cream);}
+
+  /* ---------- hero ---------- */
+  .hero{padding:56px 24px 64px;text-align:center;}
+  .pill{
+    display:inline-flex;align-items:center;gap:8px;
+    background:var(--pill-bg);border-radius:4px;padding:7px 14px 7px 8px;
+    font-family:var(--label);font-size:13px;font-weight:500;letter-spacing:.01em;color:var(--ink);
+    margin-bottom:28px;
+  }
+  .pill-mark{
+    width:18px;height:18px;border-radius:4px;background:var(--olive);
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  }
+  .pill-mark svg{width:11px;height:11px;}
+  .hero-h1-wrap{display:flex;align-items:center;justify-content:center;gap:14px;}
+  .hero-paren{font-family:var(--serif);font-size:96px;line-height:1;color:rgba(43,41,39,.26);flex-shrink:0;}
+  h1.hero-h1{
+    font-family:var(--serif);font-weight:400;
+    font-size:96px;line-height:1.1;letter-spacing:-0.03em;color:var(--ink);
+  }
+  h1.hero-h1 em{font-style:italic;}
+  .lead{
+    font-size:18px;line-height:1.3;letter-spacing:-0.01em;color:var(--ink-soft);
+    max-width:600px;margin:26px auto 34px;
+  }
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;
+    font-family:var(--sans);font-size:17px;font-weight:500;
+    padding:18px 26px;border-radius:10px;border:1px solid transparent;
+    cursor:pointer;transition:transform .2s ease, opacity .2s ease;
+  }
+  .btn:hover{transform:translateY(-2px);}
+  .btn-primary{background:var(--olive);color:var(--cream);}
+  .btn-primary:hover{background:var(--olive-ink);}
+  .btn-outline{background:transparent;color:var(--olive);border-color:rgba(43,41,39,.18);}
+  .btn-outline:hover{border-color:var(--olive);}
+  .cta-row{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;}
+
+  /* ---------- painted-sky panel ---------- */
+  .panel{position:relative;border-radius:20px;overflow:hidden;background:#dfe6dd;}
+  .painted-sky{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;}
+  .panel::after{
+    content:'';position:absolute;inset:0;opacity:.45;mix-blend-mode:overlay;pointer-events:none;z-index:1;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E");
+  }
+  .panel-inner{position:relative;z-index:2;padding:64px 48px 56px;}
+
+  /* browser-frame mockup + floating test card */
+  .browser-mock{max-width:880px;margin:0 auto 96px;position:relative;}
+  .browser-chrome{
+    background:rgba(255,255,255,.85);border-radius:14px 14px 0 0;padding:12px 16px;
+    display:flex;align-items:center;gap:6px;backdrop-filter:blur(6px);
+    box-shadow:0 30px 60px rgba(43,41,39,.12);
+  }
+  .browser-chrome .dot{width:9px;height:9px;border-radius:50%;background:rgba(43,41,39,.16);flex-shrink:0;}
+  .browser-url{margin-left:10px;background:#f0eee3;border-radius:6px;padding:5px 16px;font-size:11px;color:var(--ink-soft);font-family:var(--label);}
+  .browser-screen{background:#fdfcf8;border-radius:0 0 14px 14px;padding:20px;box-shadow:0 30px 60px rgba(43,41,39,.10);}
+  .test-card{
+    position:absolute;right:-20px;bottom:-56px;width:270px;background:#fff;border-radius:16px;
+    padding:22px;text-align:left;box-shadow:0 30px 60px rgba(43,41,39,.18);
+  }
+  .test-card h4{font-size:16px;font-weight:600;margin-bottom:8px;}
+  .test-card p{font-size:13px;color:var(--ink-soft);line-height:1.4;margin-bottom:16px;}
+  .test-card .cta-row{gap:8px;justify-content:flex-start;}
+  .test-card .btn{font-size:12px;padding:10px 14px;border-radius:8px;}
+
+  .mockup-row{
+    display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:10px;background:#fff;margin-bottom:8px;
+  }
+  .mockup-row:last-child{margin-bottom:0;}
+  .mockup-avatar{width:30px;height:30px;border-radius:8px;flex-shrink:0;}
+  .mockup-co{flex:1;text-align:left;}
+  .mockup-co-name{font-size:14px;font-weight:600;color:var(--ink);}
+  .mockup-co-role{font-size:12px;color:var(--ink-soft);}
+  .mockup-status{font-family:var(--label);font-size:11px;font-weight:600;padding:5px 10px;border-radius:20px;white-space:nowrap;}
+  .status-applied{background:#e7ece4;color:#4b6b45;}
+  .status-tailoring{background:#eee3c9;color:#8a6a1c;}
+  .status-interview{background:#dce6f2;color:#2f5a91;}
+
+  .panel-copy{text-align:center;margin-bottom:56px;position:relative;z-index:2;}
+  h2.panel-h2{
+    font-family:var(--serif);font-weight:400;font-size:72px;line-height:1;letter-spacing:-0.03em;margin-bottom:16px;
+  }
+  h2.panel-h2 em{font-style:italic;}
+  .panel-copy p{font-size:16px;color:var(--ink-soft);max-width:460px;margin:0 auto;line-height:1.4;}
+
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;max-width:1160px;margin:0 auto;position:relative;z-index:2;}
+  .card{
+    background:var(--card-bg);border-radius:20px;padding:24px 24px 0;min-height:410px;
+    display:flex;flex-direction:column;text-align:left;overflow:hidden;
+  }
+  .card h3{font-size:18px;font-weight:600;line-height:1.3;color:var(--ink);margin-bottom:8px;}
+  .card p{font-size:14px;line-height:1.4;color:var(--ink-soft);margin-bottom:20px;}
+
+  /* mini checklist */
+  .mini-checklist{
+    background:#f6f4ec;border-radius:12px 12px 0 0;padding:14px 14px 0;margin-top:auto;flex:1;
+  }
+  .mini-checklist-head{font-family:var(--label);font-size:11px;font-weight:600;color:var(--ink-soft);margin-bottom:10px;display:flex;align-items:center;gap:6px;}
+  .mini-checklist-head::before{content:'';width:6px;height:6px;border-radius:50%;background:#8a9a7c;}
+  .mini-row{display:flex;align-items:center;gap:8px;background:#fff;border-radius:8px;padding:8px 10px;margin-bottom:6px;}
+  .mini-row svg{width:14px;height:14px;flex-shrink:0;}
+  .mini-row span{font-size:11px;color:var(--ink);flex:1;}
+  .mini-row small{font-size:10px;color:var(--ink-soft);}
+
+  /* mini phone */
+  .mini-phone{
+    margin-top:auto;flex:1;display:flex;align-items:flex-end;justify-content:center;padding-top:8px;
+  }
+  .phone-frame{
+    width:170px;height:230px;background:#1b1b1b;border-radius:22px 22px 0 0;padding:8px 8px 0;
+    box-shadow:0 20px 30px rgba(43,41,39,.14);
+  }
+  .phone-screen{background:#fff;border-radius:16px 16px 0 0;height:100%;padding:16px 8px 0;position:relative;overflow:hidden;}
+  .phone-notch{position:absolute;top:6px;left:50%;transform:translateX(-50%);width:44px;height:6px;background:#1b1b1b;border-radius:4px;}
+  .bubble{font-size:9px;line-height:1.3;border-radius:10px;padding:6px 9px;max-width:80%;margin-bottom:6px;}
+  .bubble-in{background:#eee;color:var(--ink);margin-right:auto;border-bottom-left-radius:3px;}
+  .bubble-out{background:#2f6fed;color:#fff;margin-left:auto;border-bottom-right-radius:3px;}
+
+  /* ---------- hours / 01-04 steps ---------- */
+  .hours{padding:112px 24px 96px;text-align:center;}
+  .hours h2.panel-h2{margin-bottom:20px;}
+  .hours .intro-line{font-size:16px;color:var(--ink-soft);max-width:480px;margin:0 auto 64px;line-height:1.4;}
+  .steps-grid{display:grid;grid-template-columns:1fr 1fr;gap:52px 64px;max-width:1040px;margin:0 auto;text-align:left;}
+  .step{display:flex;gap:20px;}
+  .step-num{font-family:var(--serif);font-size:34px;color:rgba(43,41,39,.3);flex-shrink:0;width:46px;line-height:1;}
+  .step-body h3{font-size:19px;font-weight:600;margin-bottom:6px;}
+  .step-sub{font-size:14px;color:var(--ink-soft);margin-bottom:14px;line-height:1.4;}
+  .step-checks{display:flex;flex-direction:column;gap:7px;}
+  .step-check{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);}
+  .step-check svg{width:14px;height:14px;flex-shrink:0;}
+
+  /* ---------- safety / bee section ---------- */
+  .safety{padding:96px 24px 88px;text-align:center;}
+  .badge-circle{
+    width:136px;height:136px;border-radius:50%;border:1px solid rgba(43,41,39,.14);
+    display:flex;align-items:center;justify-content:center;margin:0 auto 26px;background:#f8f3e4;
+  }
+  .badge-circle svg{width:78px;height:78px;}
+  .intro-line{font-size:16px;color:var(--ink-soft);max-width:480px;margin:0 auto 20px;line-height:1.4;}
+  h2.serif-h2{font-family:var(--serif);font-weight:400;font-size:69px;line-height:1;letter-spacing:-0.03em;margin-bottom:48px;}
+  h2.serif-h2 em{font-style:italic;}
+
+  .review-callout{
+    max-width:520px;margin:0 auto 56px;background:#fff;border-radius:16px;padding:26px 28px;text-align:left;
+    box-shadow:0 20px 44px rgba(43,41,39,.07);
+  }
+  .review-callout h4{font-size:17px;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:8px;}
+  .review-callout h4 svg{width:18px;height:18px;flex-shrink:0;}
+  .review-callout p{font-size:14px;color:var(--ink-soft);line-height:1.5;}
+
+  .stamp-wrap{display:flex;justify-content:center;margin-bottom:56px;}
+  .stamp{
+    width:340px;aspect-ratio:341/271;background:#fff;border-radius:4px;transform:rotate(-8deg);
+    box-shadow:0 26px 50px rgba(43,41,39,.14);overflow:hidden;
+    -webkit-mask-image:radial-gradient(circle 7px at 0 0, transparent 7px, black 7.5px),
+      radial-gradient(circle 7px at 100% 0, transparent 7px, black 7.5px),
+      radial-gradient(circle 7px at 0 100%, transparent 7px, black 7.5px),
+      radial-gradient(circle 7px at 100% 100%, transparent 7px, black 7.5px);
+    mask-image:radial-gradient(circle 7px at 0 0, transparent 7px, black 7.5px),
+      radial-gradient(circle 7px at 100% 0, transparent 7px, black 7.5px),
+      radial-gradient(circle 7px at 0 100%, transparent 7px, black 7.5px),
+      radial-gradient(circle 7px at 100% 100%, transparent 7px, black 7.5px);
+  }
+  .stamp svg,.stamp img{width:100%;height:100%;display:block;object-fit:cover;}
+
+  .stats{display:flex;gap:56px;justify-content:center;flex-wrap:wrap;}
+  .stat{display:flex;align-items:center;gap:8px;font-family:var(--label);font-size:15px;color:var(--ink);}
+  .stat svg{width:18px;height:18px;flex-shrink:0;}
+
+  /* ---------- closing + countryside ---------- */
+  .closing{padding:104px 24px 0;text-align:center;}
+  .mark-circle{
+    width:44px;height:44px;margin:0 auto 28px;display:flex;align-items:center;justify-content:center;
+  }
+  .mark-circle svg{width:32px;height:32px;}
+  h2.closing-h2{
+    font-family:var(--serif);font-weight:400;font-size:56px;line-height:1.08;letter-spacing:-0.03em;
+    max-width:760px;margin:0 auto 24px;
+  }
+  .closing p{font-size:17px;color:var(--ink-soft);max-width:560px;margin:0 auto 36px;line-height:1.45;}
+
+  .countryside{
+    position:relative;margin-top:56px;overflow:hidden;display:flex;flex-direction:column;
+    justify-content:flex-end;min-height:clamp(560px,54vw,860px);
+  }
+  .countryside svg,.countryside>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center bottom;z-index:0;}
+  .countryside::after{
+    content:'';position:absolute;left:0;right:0;bottom:0;height:62%;pointer-events:none;z-index:1;
+    background-image:linear-gradient(rgba(34,51,37,0) 0%, rgb(35,52,38) 77.9566%);
+  }
+  footer{
+    position:relative;z-index:2;padding:48px 24px 40px;
+    display:flex;flex-wrap:wrap;gap:40px;justify-content:space-between;
+    color:var(--cream);
+  }
+  .foot-brand{max-width:320px;}
+  .foot-logo{display:flex;align-items:center;gap:8px;font-family:var(--serif);font-size:22px;margin-bottom:10px;}
+  .foot-logo svg{width:20px;height:20px;}
+  .foot-tagline{font-size:15px;letter-spacing:-0.01em;line-height:1.3;opacity:.92;}
+  .foot-cols{display:flex;gap:64px;flex-wrap:wrap;}
+  .foot-col h4{font-family:var(--label);font-size:13px;font-weight:600;margin-bottom:14px;opacity:.7;letter-spacing:.02em;text-transform:uppercase;}
+  .foot-col a,.foot-col span{display:block;font-size:14px;margin-bottom:10px;opacity:.92;}
+  .foot-col a:hover{opacity:1;text-decoration:underline;}
+
+  /* ---------- responsive ---------- */
+  @media (max-width:900px){
+    h1.hero-h1{font-size:56px;}
+    .hero-paren{font-size:56px;}
+    h2.panel-h2{font-size:48px;}
+    h2.serif-h2{font-size:44px;}
+    h2.closing-h2{font-size:40px;}
+    .cards{grid-template-columns:1fr;}
+    .panel-inner{padding:48px 24px 40px;}
+    .stats{gap:28px;}
+    .steps-grid{grid-template-columns:1fr;gap:36px;}
+    .test-card{position:static;width:auto;margin:20px auto 0;box-shadow:0 16px 32px rgba(43,41,39,.10);}
+    .browser-mock{margin-bottom:56px;}
+  }
+  @media (max-width:600px){
+    .hero{padding:40px 20px 48px;}
+    .hero-h1-wrap{gap:6px;}
+    h1.hero-h1{font-size:38px;}
+    .hero-paren{font-size:34px;}
+    .lead{font-size:16px;}
+    .btn{font-size:15px;padding:15px 20px;}
+    .panel{border-radius:20px;}
+    .panel-inner{padding:40px 16px 32px;}
+    h2.panel-h2{font-size:36px;margin-bottom:12px;}
+    .panel-copy p{font-size:15px;}
+    .card{min-height:auto;padding:20px 20px 0;}
+    .hours{padding:72px 20px 64px;}
+    .safety{padding:72px 20px 64px;}
+    h2.serif-h2{font-size:32px;margin-bottom:36px;}
+    .closing{padding:72px 20px 0;}
+    h2.closing-h2{font-size:30px;}
+    .cta-row{flex-direction:column;align-items:center;}
+    .cta-row .btn{width:100%;max-width:280px;}
+    footer{flex-direction:column;gap:32px;padding:36px 20px 28px;}
+    .foot-cols{gap:40px;}
+    .badge-circle{width:100px;height:100px;}
+    .badge-circle svg{width:58px;height:58px;}
+    .stamp{width:260px;}
+    .review-callout{padding:20px;}
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="paintTexture" x="-30%" y="-30%" width="160%" height="160%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="3" seed="7" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="55" xChannelSelector="R" yChannelSelector="G"/>
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+    <filter id="paintTextureSoft" x="-30%" y="-30%" width="160%" height="160%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="2" seed="3" result="n2"/>
+      <feDisplacementMap in="SourceGraphic" in2="n2" scale="14" xChannelSelector="R" yChannelSelector="G"/>
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+  </defs>
+</svg>
+
+<header class="top-bar">
+  <div class="nav-wrap">
+    <button class="menu-btn" id="navToggle" aria-haspopup="true" aria-expanded="false" aria-label="Open menu">
+      <svg viewBox="0 0 16 16" fill="none"><path d="M1 4h14M1 8h14M1 12h14" stroke="#2b2927" stroke-width="1.4" stroke-linecap="round"/></svg>
+    </button>
+    <nav class="nav-menu" id="navMenu">
+      <a class="nav-link" href="#product">Product</a>
+      <a class="nav-link" href="#pricing">Pricing</a>
+      <a class="nav-link" href="#about">About</a>
+      <div class="nav-menu-actions">
+        <a class="btn-ghost-sm" href="#">Sign in</a>
+        <a class="btn-dark-sm" href="#">Get started</a>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <section class="hero wrap">
+    <div class="pill">
+      <span class="pill-mark">
+        <svg viewBox="0 0 12 12" fill="none"><path d="M2 6.2l2.6 2.6L10 3" stroke="#f2efe5" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      Built for job seekers
+    </div>
+    <div class="hero-h1-wrap">
+      <span class="hero-paren">(</span>
+      <h1 class="hero-h1">The application<br><em>moves itself</em></h1>
+      <span class="hero-paren">)</span>
+    </div>
+    <p class="lead">jobbot filters postings, tailors your resume, answers each screening question once, and submits fifty applications a week — while you review every send.</p>
+    <a class="btn btn-primary" href="#assistant">Meet your assistant</a>
+  </section>
+
+  <div class="stage">
+    <section class="panel reveal" id="assistant">
+      <img class="painted-sky" src="/static/landing3/sky.png" alt="" aria-hidden="true">
+      <div class="panel-inner">
+
+        <div class="browser-mock">
+          <div class="browser-chrome">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="browser-url">app.jobbot.dev</span>
+          </div>
+          <div class="browser-screen">
+            <div class="mockup-row">
+              <div class="mockup-avatar" style="background:#dce6f2;"></div>
+              <div class="mockup-co"><div class="mockup-co-name">Northwind Labs</div><div class="mockup-co-role">Senior Backend Engineer</div></div>
+              <span class="mockup-status status-interview">Interview</span>
+            </div>
+            <div class="mockup-row">
+              <div class="mockup-avatar" style="background:#eee3c9;"></div>
+              <div class="mockup-co"><div class="mockup-co-name">Cobalt Robotics</div><div class="mockup-co-role">Staff Platform Engineer</div></div>
+              <span class="mockup-status status-tailoring">Tailoring resume</span>
+            </div>
+            <div class="mockup-row">
+              <div class="mockup-avatar" style="background:#e7ece4;"></div>
+              <div class="mockup-co"><div class="mockup-co-name">Fernbrook Health</div><div class="mockup-co-role">Full-Stack Engineer</div></div>
+              <span class="mockup-status status-applied">Applied</span>
+            </div>
+          </div>
+          <div class="test-card">
+            <h4>Curious how it reads yours?</h4>
+            <p>Upload one resume and watch jobbot line it up against a real posting, live.</p>
+            <div class="cta-row">
+              <a class="btn btn-primary" href="#">Try a sample resume</a>
+              <a class="btn btn-outline" href="#">Upload your resume</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-copy">
+          <h2 class="panel-h2">Never turn down<br><em>an interview again</em></h2>
+          <p>jobbot doesn't cut corners on quality — it gives every applicant room to apply to more.</p>
+        </div>
+
+        <div class="cards">
+          <div class="card reveal">
+            <h3>Automatically tailors resumes</h3>
+            <p>Every posting gets its own pass — jobbot rewrites your resume to match the role before it ever leaves the queue.</p>
+            <div class="mini-checklist">
+              <div class="mini-checklist-head">jobbot working…</div>
+              <div class="mini-row">
+                <svg viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="#5c7c68" stroke-width="1.3"/><path d="M4.3 7.2l1.8 1.8 3.6-3.8" stroke="#5c7c68" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span>Match resume to job description</span><small>done</small>
+              </div>
+              <div class="mini-row">
+                <svg viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="#5c7c68" stroke-width="1.3"/><path d="M4.3 7.2l1.8 1.8 3.6-3.8" stroke="#5c7c68" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span>Reorder relevant experience</span><small>done</small>
+              </div>
+              <div class="mini-row">
+                <svg viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="#b8ac86" stroke-width="1.3"/><path d="M7 4v3.3l2 1.3" stroke="#b8ac86" stroke-width="1.3" stroke-linecap="round"/></svg>
+                <span>Draft cover letter</span><small>queued</small>
+              </div>
+            </div>
+          </div>
+
+          <div class="card reveal">
+            <h3>No question answered twice</h3>
+            <p>Answers get saved from the first time you write them — jobbot reuses them for every screening form after that, so nothing steals your evening.</p>
+          </div>
+
+          <div class="card reveal">
+            <h3>iMessage for interview updates</h3>
+            <p>Nobody checks a job-board inbox anymore. jobbot meets recruiters where they already are, so an unread email never costs you a slot.</p>
+            <div class="mini-phone">
+              <div class="phone-frame">
+                <div class="phone-screen">
+                  <div class="phone-notch"></div>
+                  <div class="bubble bubble-in">Hi! Are you still interested in the Senior Engineer role at Acme?</div>
+                  <div class="bubble bubble-out">Yes — available Thursday afternoon for a call.</div>
+                  <div class="bubble bubble-in">Great, sending an invite now.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </div>
+
+  <section class="hours wrap reveal">
+    <h2 class="panel-h2">Hours back in your week,<br><em>none of it spent guessing</em></h2>
+    <p class="intro-line">Every automated step still waits on a human sign-off — jobbot does the repetitive part, you make the final call.</p>
+    <div class="steps-grid">
+      <div class="step">
+        <div class="step-num">01</div>
+        <div class="step-body">
+          <h3>New postings sort themselves</h3>
+          <p class="step-sub">jobbot scans every board the moment a listing goes live and decides where it belongs.</p>
+          <div class="step-checks">
+            <div class="step-check"><svg viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="#5c7c68" stroke-width="1.2"/><path d="M4.3 7.2l1.8 1.8 3.6-3.8" stroke="#5c7c68" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>A strong match opens a new application</div>
+            <div class="step-check"><svg viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="#5c7c68" stroke-width="1.2"/><path d="M4.3 7.2l1.8 1.8 3.6-3.8" stroke="#5c7c68" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Everything else gets filed for later</div>
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <div class="step-body">
+          <h3>Requirement changes surface instantly</h3>
+          <p class="step-sub">No more re-reading a job description to spot what moved.</p>
+          <div class="step-checks">
+            <div class="step-check"><svg viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="#5c7c68" stroke-width="1.2"/><path d="M4.3 7.2l1.8 1.8 3.6-3.8" stroke="#5c7c68" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Edits are flagged the moment they post</div>
+            <div class="step-check"><svg viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="#5c7c68" stroke-width="1.2"/><path d="M4.3 7.2l1.8 1.8 3.6-3.8" stroke="#5c7c68" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>One less manual check to remember</div>
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <div class="step-body">
+          <h3>Answers and follow-ups draft themselves</h3>
+          <p class="step-sub">Say it once and jobbot reuses it everywhere it fits.</p>
+          <div class="step-checks">
+            <div class="step-check"><svg viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="#5c7c68" stroke-width="1.2"/><path d="M4.3 7.2l1.8 1.8 3.6-3.8" stroke="#5c7c68" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Screening questions get pre-filled answers</div>
+            <div class="step-check"><svg viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="#5c7c68" stroke-width="1.2"/><path d="M4.3 7.2l1.8 1.8 3.6-3.8" stroke="#5c7c68" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Thank-you notes go out without a reminder</div>
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">04</div>
+        <div class="step-body">
+          <h3>A tailored resume before your coffee's ready</h3>
+          <p class="step-sub">jobbot reads the posting the way a recruiter would, just faster.</p>
+          <div class="step-checks">
+            <div class="step-check"><svg viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="#5c7c68" stroke-width="1.2"/><path d="M4.3 7.2l1.8 1.8 3.6-3.8" stroke="#5c7c68" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Every past role reordered to match</div>
+            <div class="step-check"><svg viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="#5c7c68" stroke-width="1.2"/><path d="M4.3 7.2l1.8 1.8 3.6-3.8" stroke="#5c7c68" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Formatted clean enough to pass an ATS</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="safety reveal">
+    <div class="badge-circle">
+      <img src="/static/landing3/bee.png" alt="" aria-hidden="true" style="width:100%;height:100%;object-fit:contain;display:block;">
+    </div>
+    <p class="intro-line">jobbot tackles the four biggest time sinks in job hunting — so you can apply to more roles without burning out.</p>
+    <h2 class="serif-h2">Automated work,<br><em>human review</em></h2>
+
+    <div class="review-callout">
+      <h4><svg viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="8" stroke="#5c7c68" stroke-width="1.3"/><path d="M5.5 9.3l2.3 2.3 4.7-5" stroke="#5c7c68" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>You approve every send</h4>
+      <p>jobbot drafts, matches, and prepares — but nothing goes out until you say so. No blind autopilot, ever.</p>
+    </div>
+
+    <div class="stamp-wrap">
+      <div class="stamp">
+        <img src="/static/landing3/stamp.png" alt="" aria-hidden="true">
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat">
+        <svg viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="8" stroke="#5c7c68" stroke-width="1.3"/><path d="M5.5 9.3l2.3 2.3 4.7-5" stroke="#5c7c68" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Your answers stay yours
+      </div>
+      <div class="stat">
+        <svg viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="8" stroke="#5c7c68" stroke-width="1.3"/><path d="M5.5 9.3l2.3 2.3 4.7-5" stroke="#5c7c68" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        ~7 hours saved per week
+      </div>
+    </div>
+  </section>
+
+  <section class="closing reveal">
+    <div class="mark-circle">
+      <svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" stroke="#2b2927" stroke-width="1.1"/><path d="M16 6v6M16 20v6M6 16h6M20 16h6" stroke="#2b2927" stroke-width="1.1"/><path d="M16 12l3 4-3 4-3-4 3-4z" fill="#2b2927"/></svg>
+    </div>
+    <h2 class="closing-h2">Leave the form-filling behind. Focus on the interview.</h2>
+    <p>Whether you're between roles, climbing to your next title, or exploring a career change, jobbot handles the repetitive back-and-forth so you can walk into every conversation prepared to do what you do best: the work.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#assistant">Meet your assistant</a>
+      <a class="btn btn-outline" href="#pipeline">See the pipeline</a>
+    </div>
+
+    <div class="countryside">
+      <img src="/static/landing3/countryside.png" alt="" aria-hidden="true">
+
+      <footer>
+        <div class="foot-brand">
+          <div class="foot-logo">
+            <svg viewBox="0 0 20 20" fill="none"><rect x="1" y="1" width="18" height="18" rx="5" stroke="#f2efe5" stroke-width="1.2"/><path d="M6 10.5l2.5 2.5L14 7" stroke="#f2efe5" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            jobbot
+          </div>
+          <div class="foot-tagline">Quiet, dependable software for the modern job search.</div>
+        </div>
+        <div class="foot-cols">
+          <div class="foot-col">
+            <h4>Product</h4>
+            <a href="#">Features</a>
+            <a href="#">Integrations</a>
+            <a href="#">Demo</a>
+            <a href="#">Pricing</a>
+          </div>
+          <div class="foot-col">
+            <h4>Contact</h4>
+            <span>hello@jobbot.local</span>
+            <a href="#">GitHub</a>
+          </div>
+        </div>
+      </footer>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  (function(){
+    var prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var els = document.querySelectorAll('.reveal');
+    if (prefersReduced || !('IntersectionObserver' in window)) {
+      els.forEach(function(el){ el.classList.add('is-visible'); });
+    } else {
+      var io = new IntersectionObserver(function(entries){
+        entries.forEach(function(entry){
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-visible');
+            io.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.15, rootMargin: '0px 0px -60px 0px' });
+      els.forEach(function(el){ io.observe(el); });
+    }
+
+    var toggle = document.getElementById('navToggle');
+    var menu = document.getElementById('navMenu');
+    toggle.addEventListener('click', function(e){
+      e.stopPropagation();
+      var open = menu.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    document.addEventListener('click', function(e){
+      if (!menu.contains(e.target) && e.target !== toggle) {
+        menu.classList.remove('open');
+        toggle.setAttribute('aria-expanded', 'false');
+      }
+    });
+  })();
+</script>
+
+</body>
+</html>

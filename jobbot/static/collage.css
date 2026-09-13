@@ -1,0 +1,158 @@
+/* jobbot collage design system — shared tokens.
+   Values extracted from templates/landing2.html. See docs/design/02-design-tokens.md.
+
+   CONTRACT: this file is owned by the integration branch. Consumers (intake_ui.py,
+   dashboard.py) import it and add their own rules in their own files. Do not edit
+   this file from a feature worktree without saying so. */
+
+:root {
+  /* canvas */
+  --paper:        rgb(224, 224, 255);   /* page background, the one constant */
+  --ink:          #000;
+  --ink-invert:   #ffffff;
+  --plate-dark:   #1c1c1f;
+  --plate-light:  rgba(255, 255, 255, 0.92);
+
+  /* brand */
+  --violet:       #5b4cdb;
+  --magenta:      #ff5dfc;
+  --warm-red:     #e6533c;
+
+  /* type */
+  --f-body:    'Space Mono', 'Roboto Mono', monospace;
+  --f-display: 'National Park', 'Archivo Black', sans-serif;
+  --f-label:   'Lato', system-ui, sans-serif;
+  --f-hand:    'Nanum Pen Script', cursive;
+  --f-mark:    'Zilla Slab Highlight', serif;
+
+  /* decoration scale — ONLY for decorative layers, never form controls.
+     Mirrors the landing2 stage unit. */
+  --rpx: min(calc(100vw / 600), 1px);
+
+  /* hard offset shadows, zero blur — never soft drop shadows */
+  --lift-magenta: 6px 6px 0 var(--magenta);
+  --lift-black:   4px 4px 0 var(--ink);
+  --lift-violet:  5px 5px 0 var(--violet);
+
+  /* the hand-pinned tilt band */
+  --tilt-a: -4.77deg;
+  --tilt-b:  3deg;
+  --tilt-c: -1.5deg;
+
+  --tap: 48px;   /* minimum touch target */
+}
+
+/* ---- decoration layer -------------------------------------------------
+   Absolutely positioned art that must never intercept a click. Anything
+   inside is free to use --rpx and rotate. */
+.decor {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.decor > * { position: absolute; }
+
+/* content always sits above decoration */
+.layer-content { position: relative; z-index: 1; }
+
+/* ---- surfaces --------------------------------------------------------- */
+.plate {
+  background: var(--plate-light);
+  border: 2px solid var(--ink);
+  box-shadow: var(--lift-black);
+}
+.plate-dark {
+  background: var(--plate-dark);
+  color: var(--ink-invert);
+  box-shadow: var(--lift-magenta);
+}
+.tilt-a { transform: rotate(var(--tilt-a)); }
+.tilt-b { transform: rotate(var(--tilt-b)); }
+.tilt-c { transform: rotate(var(--tilt-c)); }
+
+/* ---- type ------------------------------------------------------------- */
+body.collage {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 16px;
+  line-height: 1.5;
+}
+.collage h1, .collage h2, .collage h3 {
+  font-family: var(--f-display);
+  font-weight: 700;
+  line-height: 1.25;
+}
+.collage .label { font-family: var(--f-label); font-weight: 700; }
+.collage .hand  { font-family: var(--f-hand); }
+
+/* ---- controls: axis-aligned, real px, never scaled by --rpx ------------ */
+.collage .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  padding: 0 22px;
+  font-family: var(--f-label);
+  font-weight: 700;
+  font-size: 16px;
+  border: 2px solid var(--ink);
+  border-radius: 4px;
+  cursor: pointer;
+  transform: none;             /* controls are never tilted */
+  text-decoration: none;
+}
+.collage .btn-primary {
+  background: var(--violet);
+  color: var(--ink-invert);
+  box-shadow: var(--lift-black);
+}
+.collage .btn-secondary {
+  background: transparent;
+  color: var(--ink);
+}
+.collage .btn:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--ink); }
+.collage .btn:focus-visible { outline: 3px solid var(--magenta); outline-offset: 3px; }
+
+.collage input,
+.collage textarea,
+.collage select {
+  min-height: var(--tap);
+  padding: 10px 12px;
+  font-family: var(--f-body);
+  font-size: 16px;          /* 16px avoids iOS zoom-on-focus */
+  color: var(--ink);
+  background: #fff;
+  border: 2px solid var(--ink);
+  border-radius: 4px;
+}
+.collage input:focus-visible,
+.collage textarea:focus-visible {
+  outline: 3px solid var(--magenta);
+  outline-offset: 2px;
+}
+
+/* ---- the logo mark, shared with landing2 ------------------------------ */
+.collage .logo-dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--violet);
+  color: #fff;
+  font-family: var(--f-hand);
+  font-size: 26px;
+  text-decoration: none;
+  box-shadow: inset 0 -5px 0 rgba(0, 0, 0, 0.15);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collage *, .collage *::before, .collage *::after {
+    animation-duration: .001ms !important;
+    transition-duration: .001ms !important;
+  }
+}
